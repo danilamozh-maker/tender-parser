@@ -38,6 +38,45 @@ def get_current_user(request: Request):
     user = database.get_user(email)
     return user
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": {}, "error": None})
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_post(request: Request, email: str = Form(...), password: str = Form(...)):
+    user = database.get_user(email)
+    if not user:
+        return templates.TemplateResponse("login.html", {"request": {}, "error": "Пользователь не найден"})
+    
+    if not database.verify_password(password, user["hashed_password"]):
+        return templates.TemplateResponse("login.html", {"request": {}, "error": "Неверный пароль"})
+    
+    response = RedirectResponse(url="/", status_code=302)
+    response.set_cookie(key="user_email", value=email, httponly=True, max_age=3600*24*7)
+    return response
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    return templates.TemplateResponse("register.html", {"request": {}, "error": None})
+
+@app.post("/register", response_class=HTMLResponse)
+async def register_post(request: Request, email: str = Form(...), password: str = Form(...)):
+    if len(password) < 6:
+        return templates.TemplateResponse("register.html", {"request": {}, "error": "Пароль должен быть не менее 6 символов"})
+    
+    success = database.create_user(email, password)
+    if not success:
+        return templates.TemplateResponse("register.html", {"request": {}, "error": "Пользователь с такой почтой уже существует"})
+    
+    response = RedirectResponse(url="/login", status_code=302)
+    return response
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie("user_email")
+    return response
+
 # ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
 def read_docx(file_path):
     try:
@@ -170,7 +209,6 @@ def analyze_file(file_path, selected_fields):
     
     answer = query_kodik(prompt)
     
-    # Оставляем только выбранные поля
     lines = answer.split('\n')
     filtered_lines = []
     
@@ -184,46 +222,6 @@ def analyze_file(file_path, selected_fields):
         return answer
     
     return "\n".join(filtered_lines)
-
-# ================= СТРАНИЦЫ АВТОРИЗАЦИИ =================
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
-
-@app.post("/login", response_class=HTMLResponse)
-async def login_post(request: Request, email: str = Form(...), password: str = Form(...)):
-    user = database.get_user(email)
-    if not user:
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Пользователь не найден"})
-    
-    if not database.verify_password(password, user["hashed_password"]):
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Неверный пароль"})
-    
-    response = RedirectResponse(url="/", status_code=302)
-    response.set_cookie(key="user_email", value=email, httponly=True, max_age=3600*24*7)
-    return response
-
-@app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request, "error": None})
-
-@app.post("/register", response_class=HTMLResponse)
-async def register_post(request: Request, email: str = Form(...), password: str = Form(...)):
-    if len(password) < 6:
-        return templates.TemplateResponse("register.html", {"request": request, "error": "Пароль должен быть не менее 6 символов"})
-    
-    success = database.create_user(email, password)
-    if not success:
-        return templates.TemplateResponse("register.html", {"request": request, "error": "Пользователь с такой почтой уже существует"})
-    
-    response = RedirectResponse(url="/login", status_code=302)
-    return response
-
-@app.get("/logout")
-async def logout():
-    response = RedirectResponse(url="/login", status_code=302)
-    response.delete_cookie("user_email")
-    return response
 
 # ================= ГЛАВНАЯ СТРАНИЦА =================
 @app.get("/", response_class=HTMLResponse)
