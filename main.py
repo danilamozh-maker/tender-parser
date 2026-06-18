@@ -10,6 +10,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from urllib.parse import quote
 import openpyxl
+import xlrd
 import uvicorn
 
 app = FastAPI()
@@ -43,14 +44,30 @@ def read_txt(file_path):
             return f"Ошибка чтения txt: {e}"
 
 def read_excel(file_path):
+    # Пробуем прочитать .xlsx через openpyxl
     try:
         wb = openpyxl.load_workbook(file_path, data_only=True)
         sheet = wb.active
         rows = sheet.iter_rows(values_only=True)
         text = "\n".join([str(cell) for row in rows for cell in row if cell])
         return text
-    except Exception as e:
-        return f"Ошибка чтения Excel: {e}"
+    except:
+        # Если не получилось — пробуем .xls через xlrd
+        try:
+            wb = xlrd.open_workbook(file_path)
+            sheet = wb.sheet_by_index(0)
+            text = ""
+            for row in range(sheet.nrows):
+                row_text = []
+                for col in range(sheet.ncols):
+                    cell = sheet.cell_value(row, col)
+                    if cell:
+                        row_text.append(str(cell))
+                if row_text:
+                    text += " ".join(row_text) + "\n"
+            return text
+        except Exception as e:
+            return f"Ошибка чтения Excel: {e}"
 
 def query_kodik(prompt):
     messages = [
@@ -204,7 +221,7 @@ async def analyze_files(files: list[UploadFile] = File(...)):
     
     finally:
         if os.path.exists(temp_dir):
-            os.rmdir(temp_dir)
+            shutil.rmtree(temp_dir)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
