@@ -17,7 +17,7 @@ templates = Jinja2Templates(directory="templates")
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.kodikrouter.ru/v1/chat/completions"
-API_KEY = "sk-kr_live_E-JvaZzvEh-AnkSjO6d35qcAJ7RCysKt"  # ← ВСТАВЬ СВОЙ КЛЮЧ!
+API_KEY = "sk-kr_live_E-JvaZzvEh-AnkSjO6d35qcAJ7RCysKt" # ← ВСТАВЬ СВОЙ КЛЮЧ!
 MODEL_NAME = "deepseek/deepseek-chat"
 # ============================================
 
@@ -135,58 +135,57 @@ async def analyze_files(files: list[UploadFile] = File(...)):
     
     try:
         for file in files:
-
             if not file.filename.endswith(('.docx', '.txt')):
-                            error_files.append(f"{file.filename} (неподдерживаемый формат)")
-                            continue
-                        
-                        file_path = os.path.join(temp_dir, file.filename)
-                        with open(file_path, "wb") as buffer:
-                            shutil.copyfileobj(file.file, buffer)
-                        
-                        result = analyze_file(file_path)
-                        results.append({
-                            "filename": file.filename,
-                            "result": result
-                        })
-                    
-                    if error_files:
-                        results.append({
-                            "filename": "ОШИБКИ",
-                            "result": "\n".join(error_files)
-                        })
-                    
-                    zip_buffer = io.BytesIO()
-                    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
-                        result_text = ""
-                        for r in results:
-                            result_text += f"\n{'='*60}\n"
-                            result_text += f"ФАЙЛ: {r['filename']}\n"
-                            result_text += f"{'='*60}\n\n"
-                            result_text += r['result']
-                            result_text += "\n\n"
-                        
-                        zip_file.writestr(
-                            f"тендеры_результат_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                            result_text
-                        )
-                        
-                        for file in files:
-                            if file.filename.endswith(('.docx', '.txt')):
-                                file_path = os.path.join(temp_dir, file.filename)
-                                if os.path.exists(file_path):
-                                    zip_file.write(file_path, file.filename)
-                    
-                    zip_buffer.seek(0)
-                    return Response(
-                        zip_buffer.getvalue(),
-                        media_type="application/zip",
-                        headers={"Content-Disposition": f"attachment; filename=результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"}
-                    )
-                
-                finally:
-                    if os.path.exists(temp_dir):
-                        shutil.rmtree(temp_dir)
+                error_files.append(f"{file.filename} (неподдерживаемый формат)")
+                continue
+            
+            file_path = os.path.join(temp_dir, file.filename)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            result = analyze_file(file_path)
+            results.append({
+                "filename": file.filename,
+                "result": result
+            })
+        
+        if error_files:
+            results.append({
+                "filename": "ОШИБКИ",
+                "result": "\n".join(error_files)
+            })
+        
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+            result_text = ""
+            for r in results:
+                result_text += f"\n{'='*60}\n"
+                result_text += f"ФАЙЛ: {r['filename']}\n"
+                result_text += f"{'='*60}\n\n"
+                result_text += r['result']
+                result_text += "\n\n"
+            
+            zip_file.writestr(
+                f"тендеры_результат_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                result_text
+            )
+            
+            for file in files:
+                if file.filename.endswith(('.docx', '.txt')):
+                    file_path = os.path.join(temp_dir, file.filename)
+                    if os.path.exists(file_path):
+                        zip_file.write(file_path, file.filename)
+        
+        zip_buffer.seek(0)
+        return Response(
+            zip_buffer.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"}
+        )
+    
+    finally:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
