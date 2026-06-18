@@ -52,3 +52,5 @@ def verify_password(plain_password: str, hashed_password: str):
     # Обрезаем пароль до 72 символов при проверке
     plain_password = plain_password[:72]
     return pwd_context.verify(plain_password, hashed_password)
+
+
