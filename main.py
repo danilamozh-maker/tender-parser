@@ -14,6 +14,7 @@ import openpyxl
 import xlrd
 import uvicorn
 import database
+print("=== VERSION 2.0 WITH PASSWORD TRUNCATE ===")
 
 app = FastAPI()
 
