@@ -1,11 +1,10 @@
 import sqlite3
-from datetime import datetime
-from passlib.context import CryptContext
+from passlib.hash import sha256_crypt
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+DB_PATH = "users.db"
 
 def get_db():
-    conn = sqlite3.connect("users.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -21,13 +20,14 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+    print("✅ База данных инициализирована")
 
 def create_user(email: str, password: str):
-    # Обрезаем пароль до 72 символов для bcrypt
+    # Обрезаем пароль до 72 символов (для безопасности)
     password = password[:72]
     
     conn = get_db()
-    hashed = pwd_context.hash(password)
+    hashed = sha256_crypt.hash(password)
     try:
         conn.execute(
             "INSERT INTO users (email, hashed_password) VALUES (?, ?)",
@@ -35,9 +35,15 @@ def create_user(email: str, password: str):
         )
         conn.commit()
         conn.close()
+        print(f"✅ Пользователь {email} создан")
         return True
     except sqlite3.IntegrityError:
         conn.close()
+        print(f"❌ Пользователь {email} уже существует")
+        return False
+    except Exception as e:
+        conn.close()
+        print(f"❌ Ошибка при создании пользователя: {e}")
         return False
 
 def get_user(email: str):
@@ -51,6 +57,4 @@ def get_user(email: str):
 def verify_password(plain_password: str, hashed_password: str):
     # Обрезаем пароль до 72 символов при проверке
     plain_password = plain_password[:72]
-    return pwd_context.verify(plain_password, hashed_password)
-
-
+    return sha256_crypt.verify(plain_password, hashed_password)
