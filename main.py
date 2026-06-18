@@ -7,9 +7,8 @@ from pathlib import Path
 from datetime import datetime
 from docx import Document
 import requests
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response, Depends
-from fastapi.responses import HTMLResponse, Response as FastAPIResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from urllib.parse import quote
 import openpyxl
 import xlrd
@@ -20,12 +19,6 @@ app = FastAPI()
 
 # Инициализация базы данных
 database.init_db()
-
-# Шаблоны
-templates = Jinja2Templates(directory="templates")
-import os
-print("Текущая директория:", os.getcwd())
-print("Содержимое папки templates:", os.listdir("templates") if os.path.exists("templates") else "❌ Папка templates ОТСУТСТВУЕТ!")
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.kodikrouter.ru/v1/chat/completions"
@@ -41,38 +34,184 @@ def get_current_user(request: Request):
     user = database.get_user(email)
     return user
 
+# ================= СТРАНИЦЫ АВТОРИЗАЦИИ (без Jinja2) =================
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": {}, "error": None})
+    error = request.query_params.get("error", "")
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Вход</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+            .card {
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                max-width: 400px;
+                width: 100%;
+            }
+            h1 { margin-bottom: 20px; color: #333; }
+            input {
+                width: 100%;
+                padding: 12px;
+                margin-bottom: 15px;
+                border: 2px solid #e2e8f0;
+                border-radius: 8px;
+                font-size: 16px;
+            }
+            button {
+                width: 100%;
+                padding: 14px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 18px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+            .error {
+                color: #ef4444;
+                margin-bottom: 15px;
+                padding: 10px;
+                background: #fee2e2;
+                border-radius: 8px;
+            }
+            .link {
+                margin-top: 15px;
+                text-align: center;
+                font-size: 14px;
+            }
+            a { color: #667eea; text-decoration: none; font-weight: 600; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>🔐 Вход</h1>
+            """ + (f'<div class="error">{error}</div>' if error else "") + """
+            <form method="post">
+                <input type="email" name="email" placeholder="Почта" required>
+                <input type="password" name="password" placeholder="Пароль" required>
+                <button type="submit">Войти</button>
+            </form>
+            <div class="link">
+                Нет аккаунта? <a href="/register">Зарегистрироваться</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 @app.post("/login", response_class=HTMLResponse)
 async def login_post(request: Request, email: str = Form(...), password: str = Form(...)):
     user = database.get_user(email)
     if not user:
-        return templates.TemplateResponse("login.html", {"request": {}, "error": "Пользователь не найден"})
-    
+        return RedirectResponse(url="/login?error=Пользователь не найден", status_code=302)
     if not database.verify_password(password, user["hashed_password"]):
-        return templates.TemplateResponse("login.html", {"request": {}, "error": "Неверный пароль"})
-    
+        return RedirectResponse(url="/login?error=Неверный пароль", status_code=302)
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(key="user_email", value=email, httponly=True, max_age=3600*24*7)
     return response
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": {}, "error": None})
+    error = request.query_params.get("error", "")
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Регистрация</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+            .card {
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                max-width: 400px;
+                width: 100%;
+            }
+            h1 { margin-bottom: 20px; color: #333; }
+            input {
+                width: 100%;
+                padding: 12px;
+                margin-bottom: 15px;
+                border: 2px solid #e2e8f0;
+                border-radius: 8px;
+                font-size: 16px;
+            }
+            button {
+                width: 100%;
+                padding: 14px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 18px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+            .error {
+                color: #ef4444;
+                margin-bottom: 15px;
+                padding: 10px;
+                background: #fee2e2;
+                border-radius: 8px;
+            }
+            .link {
+                margin-top: 15px;
+                text-align: center;
+                font-size: 14px;
+            }
+            a { color: #667eea; text-decoration: none; font-weight: 600; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>📝 Регистрация</h1>
+            """ + (f'<div class="error">{error}</div>' if error else "") + """
+            <form method="post">
+                <input type="email" name="email" placeholder="Почта" required>
+                <input type="password" name="password" placeholder="Пароль" required>
+                <button type="submit">Зарегистрироваться</button>
+            </form>
+            <div class="link">
+                Уже есть аккаунт? <a href="/login">Войти</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 @app.post("/register", response_class=HTMLResponse)
 async def register_post(request: Request, email: str = Form(...), password: str = Form(...)):
     if len(password) < 6:
-        return templates.TemplateResponse("register.html", {"request": {}, "error": "Пароль должен быть не менее 6 символов"})
-    
+        return RedirectResponse(url="/register?error=Пароль должен быть не менее 6 символов", status_code=302)
     success = database.create_user(email, password)
     if not success:
-        return templates.TemplateResponse("register.html", {"request": {}, "error": "Пользователь с такой почтой уже существует"})
-    
-    response = RedirectResponse(url="/login", status_code=302)
-    return response
+        return RedirectResponse(url="/register?error=Пользователь с такой почтой уже существует", status_code=302)
+    return RedirectResponse(url="/login", status_code=302)
 
 @app.get("/logout")
 async def logout():
