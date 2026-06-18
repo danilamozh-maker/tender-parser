@@ -152,7 +152,22 @@ def analyze_file(file_path, selected_fields):
 Извлеки данные и напиши в указанном формате."""
     
     answer = query_kodik(prompt)
-    return answer
+    
+    # ===== Оставляем только те строки, которые начинаются с выбранных полей =====
+    lines = answer.split('\n')
+    filtered_lines = []
+    
+    for line in lines:
+        for field in selected_fields:
+            if line.strip().startswith(field):
+                filtered_lines.append(line)
+                break
+    
+    # Если ничего не нашлось — возвращаем ответ как есть (на всякий случай)
+    if not filtered_lines:
+        return answer
+    
+    return "\n".join(filtered_lines)
 
 # ================= ГЛАВНАЯ СТРАНИЦА =================
 @app.get("/", response_class=HTMLResponse)
