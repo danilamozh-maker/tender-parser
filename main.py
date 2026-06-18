@@ -189,6 +189,7 @@ async def analyze_files(files: list[UploadFile] = File(...)):
         
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+            # Формируем текстовое содержимое для отчёта
             result_text = ""
             for r in results:
                 result_text += f"\n{'='*60}\n"
@@ -197,11 +198,41 @@ async def analyze_files(files: list[UploadFile] = File(...)):
                 result_text += r['result']
                 result_text += "\n\n"
             
+            # ================= СОЗДАЁМ WORD-ДОКУМЕНТ =================
+            doc = Document()
+            doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
+            doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+            doc.add_paragraph('=' * 50)
+            
+            for r in results:
+                doc.add_heading(f'Файл: {r["filename"]}', level=1)
+                
+                # Разбиваем результат анализа на строки и добавляем их в документ
+                lines = r['result'].split('\n')
+                for line in lines:
+                    if line.strip():
+                        # Если строка содержит двоеточие, выделяем жирным
+                        if ':' in line:
+                            parts = line.split(':', 1)
+                            p = doc.add_paragraph()
+                            p.add_run(parts[0] + ':').bold = True
+                            p.add_run(parts[1] if len(parts) > 1 else '')
+                        else:
+                            doc.add_paragraph(line)
+                doc.add_page_break()
+            
+            # Сохраняем Word-документ в буфер
+            word_buffer = io.BytesIO()
+            doc.save(word_buffer)
+            word_buffer.seek(0)
+            
+            # Добавляем Word-файл в ZIP-архив
             zip_file.writestr(
-                f"тендеры_результат_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                result_text
+                f"тендеры_результат_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
+                word_buffer.getvalue()
             )
             
+            # Добавляем исходные файлы в ZIP (опционально)
             for file in files:
                 if file.filename.endswith(('.docx', '.txt', '.xlsx', '.xls')):
                     file_path = os.path.join(temp_dir, file.filename)
