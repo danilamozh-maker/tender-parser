@@ -7,5 +7,3 @@ requests
 openpyxl
 xlrd
 passlib
-bcrypt>=4.0.0
-python-multipart>=1.7.4
