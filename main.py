@@ -115,7 +115,7 @@ def analyze_file(file_path):
     if not content or "Ошибка чтения" in content:
         return f"⚠️ Не удалось прочитать файл"
     
-    content = content[:8000]
+    content = content[:30000]
     
     if not content.strip():
         return "⚠️ Файл пустой"
