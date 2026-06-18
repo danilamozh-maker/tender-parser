@@ -8,12 +8,10 @@ from docx import Document
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, Response
-from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 import uvicorn
 
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.kodikrouter.ru/v1/chat/completions"
@@ -118,10 +116,14 @@ def analyze_file(file_path):
     answer = query_kodik(prompt)
     return answer
 
+# ================= ГЛАВНАЯ СТРАНИЦА (без Jinja2) =================
 @app.get("/", response_class=HTMLResponse)
-async def main(request: Request):
-    return templates.TemplateResponse("index.html", {})
+async def main():
+    with open("templates/index.html", "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
 
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА =================
 @app.post("/analyze")
 async def analyze_files(files: list[UploadFile] = File(...)):
     if not files:
