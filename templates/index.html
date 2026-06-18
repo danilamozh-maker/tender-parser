@@ -22,12 +22,35 @@
             max-width: 900px;
             width: 100%;
         }
-        h1 {
-            color: #333;
-            margin-bottom: 5px;
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .header-title {
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+        .header-title h1 {
+            margin: 0;
+            color: #333;
+        }
+        .logout-btn {
+            background: #ef4444;
+            color: white;
+            padding: 8px 18px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            transition: 0.2s;
+        }
+        .logout-btn:hover {
+            background: #dc2626;
         }
         .subtitle {
             color: #666;
@@ -197,11 +220,15 @@
 </head>
 <body>
     <div class="container">
-        <h1>📄 Тендерный парсер</h1>
+        <div class="header">
+            <div class="header-title">
+                <h1>📄 Тендерный парсер</h1>
+            </div>
+            <a href="/logout" class="logout-btn">🚪 Выйти</a>
+        </div>
         <p class="subtitle">Выберите параметры и загрузите файлы для анализа</p>
 
         <div class="main-row">
-            <!-- Левая колонка: чекбоксы -->
             <div class="left-col">
                 <h3>🔍 Что анализировать:</h3>
                 <label><input type="checkbox" class="field-checkbox" value="НАЗВАНИЕ АУКЦИОНА" checked> Название аукциона</label>
@@ -217,7 +244,6 @@
                 <label><input type="checkbox" class="field-checkbox" value="ДАТА ОКОНЧАНИЯ КОНТРАКТА" checked> Дата окончания контракта</label>
             </div>
 
-            <!-- Правая колонка: загрузка файлов -->
             <div class="right-col">
                 <div class="drop-zone" id="dropZone">
                     <span class="icon">📁</span>
