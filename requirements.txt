@@ -6,3 +6,6 @@ python-docx
 requests
 openpyxl
 xlrd
+passlib
+bcrypt
+python-multipart
