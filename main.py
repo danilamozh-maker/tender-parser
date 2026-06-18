@@ -2,11 +2,12 @@ import os
 import shutil
 import zipfile
 import io
+import json
 from pathlib import Path
 from datetime import datetime
 from docx import Document
 import requests
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import HTMLResponse, Response
 from urllib.parse import quote
 import openpyxl
@@ -100,7 +101,7 @@ def query_kodik(prompt):
     except Exception as e:
         return f"❌ Ошибка: {e}"
 
-def analyze_file(file_path):
+def analyze_file(file_path, selected_fields):
     ext = Path(file_path).suffix.lower()
     
     if ext == ".docx":
@@ -120,21 +121,30 @@ def analyze_file(file_path):
     if not content.strip():
         return "⚠️ Файл пустой"
     
+    # Если поля не выбраны — используем все по умолчанию
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА",
+            "Начальная цена (НМЦ)",
+            "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ",
+            "Аванс",
+            "Обеспечение заявки",
+            "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств",
+            "Контакты",
+            "Место исполнения",
+            "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+    
+    # Формируем строку ТОЛЬКО из выбранных полей
+    fields_str = "\n".join([f"{field}: " for field in selected_fields])
+    
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
 
-НАЗВАНИЕ АУКЦИОНА: 
-Начальная цена (НМЦ): 
-ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ: 
-ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ: 
-Аванс: 
-Обеспечение заявки: 
-Обеспечение контракта: 
-Обеспечение гарантийных обязательств: 
-Контакты: 
-Место исполнения: 
-ДАТА ОКОНЧАНИЯ КОНТРАКТА: 
+{fields_str}
 
 Вот текст для анализа:
 {content}
@@ -153,9 +163,18 @@ async def main():
 
 # ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА =================
 @app.post("/analyze")
-async def analyze_files(files: list[UploadFile] = File(...)):
+async def analyze_files(
+    files: list[UploadFile] = File(...),
+    fields: str = Form("")
+):
     if not files:
         raise HTTPException(400, "Нет файлов")
+    
+    # Парсим выбранные поля из JSON
+    try:
+        selected_fields = json.loads(fields) if fields else []
+    except:
+        selected_fields = []
     
     temp_dir = f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(temp_dir, exist_ok=True)
@@ -173,7 +192,7 @@ async def analyze_files(files: list[UploadFile] = File(...)):
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             
-            result = analyze_file(file_path)
+            result = analyze_file(file_path, selected_fields)
             results.append({
                 "filename": file.filename,
                 "result": result
@@ -198,18 +217,15 @@ async def analyze_files(files: list[UploadFile] = File(...)):
                 doc.add_paragraph(r['result'])
                 doc.add_page_break()
             
-            # Сохраняем Word-документ в буфер
             word_buffer = io.BytesIO()
             doc.save(word_buffer)
             word_buffer.seek(0)
             
-            # Добавляем Word-файл в ZIP-архив
             zip_file.writestr(
                 f"тендеры_результат_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
                 word_buffer.getvalue()
             )
             
-            # Добавляем исходные файлы в ZIP (опционально)
             for file in files:
                 if file.filename.endswith(('.docx', '.txt', '.xlsx', '.xls')):
                     file_path = os.path.join(temp_dir, file.filename)
