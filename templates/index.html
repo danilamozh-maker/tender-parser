@@ -210,7 +210,7 @@
             let added = 0;
             for (let file of fileListObj) {
                 const ext = file.name.split('.').pop().toLowerCase();
-                if (ext === 'docx' || ext === 'txt') {
+                if (ext === 'docx' || ext === 'txt' || ext === 'xls' || ext === 'xlsx') {
                     files.push(file);
                     added++;
                 } else {
