@@ -8,7 +8,7 @@ from docx import Document
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, Response
-from starlette.requests import Request
+from urllib.parse import quote
 import uvicorn
 
 app = FastAPI()
@@ -116,7 +116,7 @@ def analyze_file(file_path):
     answer = query_kodik(prompt)
     return answer
 
-# ================= ГЛАВНАЯ СТРАНИЦА (без Jinja2) =================
+# ================= ГЛАВНАЯ СТРАНИЦА =================
 @app.get("/", response_class=HTMLResponse)
 async def main():
     with open("templates/index.html", "r", encoding="utf-8") as f:
@@ -179,10 +179,15 @@ async def analyze_files(files: list[UploadFile] = File(...)):
                         zip_file.write(file_path, file.filename)
         
         zip_buffer.seek(0)
+        
+        # ===== ИСПРАВЛЕННАЯ ЧАСТЬ (кодировка имени файла) =====
+        filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+        encoded_filename = quote(filename)
+        
         return Response(
             zip_buffer.getvalue(),
             media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename=результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
         )
     
     finally:
