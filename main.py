@@ -9,6 +9,7 @@ import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from urllib.parse import quote
+import openpyxl
 import uvicorn
 
 app = FastAPI()
@@ -41,6 +42,16 @@ def read_txt(file_path):
         except Exception as e:
             return f"Ошибка чтения txt: {e}"
 
+def read_excel(file_path):
+    try:
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        sheet = wb.active
+        rows = sheet.iter_rows(values_only=True)
+        text = "\n".join([str(cell) for row in rows for cell in row if cell])
+        return text
+    except Exception as e:
+        return f"Ошибка чтения Excel: {e}"
+
 def query_kodik(prompt):
     messages = [
         {"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
@@ -61,7 +72,7 @@ def query_kodik(prompt):
     }
     
     try:
-        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=6000)
+        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=600)
         
         if response.status_code == 200:
             result = response.json()
@@ -81,6 +92,8 @@ def analyze_file(file_path):
         content = read_docx(file_path)
     elif ext == ".txt":
         content = read_txt(file_path)
+    elif ext == ".xlsx" or ext == ".xls":
+        content = read_excel(file_path)
     else:
         return f"⚠️ Неподдерживаемый формат: {ext}"
     
@@ -137,7 +150,7 @@ async def analyze_files(files: list[UploadFile] = File(...)):
     
     try:
         for file in files:
-            if not file.filename.endswith(('.docx', '.txt')):
+            if not file.filename.endswith(('.docx', '.txt', '.xlsx', '.xls')):
                 error_files.append(f"{file.filename} (неподдерживаемый формат)")
                 continue
             
@@ -173,14 +186,13 @@ async def analyze_files(files: list[UploadFile] = File(...)):
             )
             
             for file in files:
-                if file.filename.endswith(('.docx', '.txt')):
+                if file.filename.endswith(('.docx', '.txt', '.xlsx', '.xls')):
                     file_path = os.path.join(temp_dir, file.filename)
                     if os.path.exists(file_path):
                         zip_file.write(file_path, file.filename)
         
         zip_buffer.seek(0)
         
-        # ===== ИСПРАВЛЕННАЯ ЧАСТЬ (кодировка имени файла) =====
         filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
         encoded_filename = quote(filename)
         
@@ -192,7 +204,7 @@ async def analyze_files(files: list[UploadFile] = File(...)):
     
     finally:
         if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
+            os.rmdir(temp_dir)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
