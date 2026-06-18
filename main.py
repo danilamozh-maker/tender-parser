@@ -23,6 +23,9 @@ database.init_db()
 
 # Шаблоны
 templates = Jinja2Templates(directory="templates")
+import os
+print("Текущая директория:", os.getcwd())
+print("Содержимое папки templates:", os.listdir("templates") if os.path.exists("templates") else "❌ Папка templates ОТСУТСТВУЕТ!")
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.kodikrouter.ru/v1/chat/completions"
