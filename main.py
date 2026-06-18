@@ -61,7 +61,7 @@ def query_kodik(prompt):
     }
     
     try:
-        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=300)
+        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=6000)
         
         if response.status_code == 200:
             result = response.json()
