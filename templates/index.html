@@ -163,20 +163,32 @@
         .status-text {
             font-weight: 500;
         }
+        .file-count {
+            background: #667eea;
+            color: white;
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📄 Тендерный парсер</h1>
-        <p class="subtitle">Загрузите DOCX,XLS,XLXS или TXT файлы для анализа через ИИ</p>
+        <p class="subtitle">Загрузите файлы для анализа через ИИ</p>
+        
         <div class="drop-zone" id="dropZone">
             <span class="icon">📁</span>
             <p><strong>Нажмите</strong> или <strong>перетащите</strong> файлы сюда</p>
-            <p style="font-size:14px;margin-top:5px;color:#94a3b8">Поддерживаются .docx, .xls, .xlsx и .txt</p>
-            <input type="file" id="fileInput" multiple accept=".docx,.txt,.xls,.xlsx">
+            <p style="font-size:14px;margin-top:5px;color:#94a3b8">Поддерживаются .docx, .txt, .xlsx, .xls</p>
+            <input type="file" id="fileInput" multiple accept=".docx,.txt,.xlsx,.xls">
         </div>
+        
         <ul id="fileList"></ul>
+        
         <button class="btn" id="analyzeBtn" disabled>🔍 Анализировать файлы</button>
+        
         <div id="status"></div>
     </div>
 
@@ -186,6 +198,7 @@
         const fileList = document.getElementById('fileList');
         const analyzeBtn = document.getElementById('analyzeBtn');
         const statusDiv = document.getElementById('status');
+        
         let files = [];
         
         dropZone.addEventListener('click', () => fileInput.click());
@@ -201,6 +214,7 @@
             dropZone.classList.remove('dragover');
             handleFiles(e.dataTransfer.files);
         });
+        
         fileInput.addEventListener('change', (e) => {
             handleFiles(e.target.files);
             fileInput.value = '';
@@ -210,7 +224,7 @@
             let added = 0;
             for (let file of fileListObj) {
                 const ext = file.name.split('.').pop().toLowerCase();
-                if (ext === 'docx' || ext === 'txt' || ext === 'xls' || ext === 'xlsx') {
+                if (ext === 'docx' || ext === 'txt' || ext === 'xlsx' || ext === 'xls') {
                     files.push(file);
                     added++;
                 } else {
@@ -222,6 +236,7 @@
                 showStatus(`✅ Добавлено ${added} файлов`, 'success');
                 setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
             }
+            // Кнопка активна ТОЛЬКО если есть файлы
             analyzeBtn.disabled = files.length === 0;
         }
         
@@ -251,8 +266,10 @@
             statusDiv.textContent = text;
             statusDiv.style.display = 'block';
         }
+        
         analyzeBtn.addEventListener('click', async () => {
             if (files.length === 0) return;
+            
             statusDiv.className = 'loading';
             statusDiv.innerHTML = `
                 <div class="spinner"></div>
@@ -262,14 +279,18 @@
                 </div>
             `;
             statusDiv.style.display = 'flex';
+            
             const formData = new FormData();
             files.forEach(f => formData.append('files', f));
+            
             analyzeBtn.disabled = true;
+            
             try {
                 const response = await fetch('/analyze', {
                     method: 'POST',
                     body: formData
                 });
+                
                 if (response.ok) {
                     const blob = await response.blob();
                     const link = document.createElement('a');
@@ -279,6 +300,7 @@
                     link.click();
                     link.remove();
                     URL.revokeObjectURL(link.href);
+                    
                     showStatus('✅ Анализ завершён! ZIP-архив скачан.', 'success');
                     files = [];
                     renderFileList();
