@@ -120,7 +120,7 @@ def analyze_file(file_path):
 
 @app.get("/", response_class=HTMLResponse)
 async def main(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {})
 
 @app.post("/analyze")
 async def analyze_files(files: list[UploadFile] = File(...)):
