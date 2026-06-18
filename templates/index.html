@@ -19,23 +19,53 @@
             padding: 40px;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 700px;
+            max-width: 900px;
             width: 100%;
         }
         h1 {
             color: #333;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
             display: flex;
             align-items: center;
             gap: 10px;
         }
         .subtitle {
             color: #666;
-            margin-bottom: 30px;
+            margin-bottom: 25px;
+        }
+        .main-row {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        .left-col {
+            flex: 0 0 240px;
+            min-width: 200px;
+        }
+        .right-col {
+            flex: 1;
+            min-width: 280px;
+        }
+        .left-col h3 {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 12px;
+        }
+        .left-col label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+            color: #1e293b;
+            cursor: pointer;
+        }
+        .left-col label input {
+            margin-right: 8px;
+            accent-color: #667eea;
+            transform: scale(1.1);
         }
         .drop-zone {
             border: 3px dashed #cbd5e1;
-            padding: 40px;
+            padding: 30px 20px;
             text-align: center;
             border-radius: 15px;
             cursor: pointer;
@@ -52,33 +82,33 @@
         }
         .drop-zone p {
             color: #64748b;
-            font-size: 16px;
+            font-size: 15px;
         }
         .drop-zone .icon {
-            font-size: 48px;
+            font-size: 40px;
             display: block;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
         #fileInput { display: none; }
         #fileList {
-            margin: 20px 0;
+            margin: 15px 0;
             padding: 0;
-            max-height: 200px;
+            max-height: 150px;
             overflow-y: auto;
         }
         #fileList li {
             list-style: none;
-            padding: 10px 15px;
+            padding: 8px 12px;
             background: #f1f5f9;
-            margin: 5px 0;
-            border-radius: 8px;
+            margin: 4px 0;
+            border-radius: 6px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             animation: fadeIn 0.3s;
         }
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
+            from { opacity: 0; transform: translateY(-6px); }
             to { opacity: 1; transform: translateY(0); }
         }
         .file-name {
@@ -87,28 +117,24 @@
         }
         .file-size {
             color: #94a3b8;
-            font-size: 14px;
-            margin-left: 10px;
+            font-size: 13px;
+            margin-left: 8px;
         }
         .remove-btn {
             color: #ef4444;
             background: none;
             border: none;
             cursor: pointer;
-            font-size: 18px;
-            padding: 0 5px;
-            transition: 0.2s;
-        }
-        .remove-btn:hover {
-            transform: scale(1.2);
+            font-size: 16px;
+            padding: 0 4px;
         }
         .btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 16px 30px;
+            padding: 14px 20px;
             border: none;
             border-radius: 12px;
-            font-size: 18px;
+            font-size: 17px;
             font-weight: 600;
             cursor: pointer;
             width: 100%;
@@ -125,9 +151,9 @@
             transform: none;
         }
         #status {
-            margin-top: 20px;
-            padding: 15px 20px;
-            border-radius: 12px;
+            margin-top: 15px;
+            padding: 12px 16px;
+            border-radius: 10px;
             display: none;
             animation: fadeIn 0.5s;
         }
@@ -135,7 +161,7 @@
             background: #f1f5f9;
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 12px;
         }
         #status.success {
             background: #dcfce7;
@@ -151,8 +177,8 @@
             border: 3px solid #e2e8f0;
             border-top: 3px solid #667eea;
             border-radius: 50%;
-            width: 30px;
-            height: 30px;
+            width: 28px;
+            height: 28px;
             animation: spin 0.8s linear infinite;
             flex-shrink: 0;
         }
@@ -163,33 +189,50 @@
         .status-text {
             font-weight: 500;
         }
-        .file-count {
-            background: #667eea;
-            color: white;
-            padding: 2px 10px;
-            border-radius: 20px;
-            font-size: 14px;
-            margin-left: 10px;
+        @media (max-width: 700px) {
+            .main-row { flex-direction: column; }
+            .left-col { flex: 1; }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📄 Тендерный парсер</h1>
-        <p class="subtitle">Загрузите файлы для анализа через ИИ</p>
-        
-        <div class="drop-zone" id="dropZone">
-            <span class="icon">📁</span>
-            <p><strong>Нажмите</strong> или <strong>перетащите</strong> файлы сюда</p>
-            <p style="font-size:14px;margin-top:5px;color:#94a3b8">Поддерживаются .docx, .txt, .xlsx, .xls</p>
-            <input type="file" id="fileInput" multiple accept=".docx,.txt,.xlsx,.xls">
+        <p class="subtitle">Выберите параметры и загрузите файлы для анализа</p>
+
+        <div class="main-row">
+            <!-- Левая колонка: чекбоксы -->
+            <div class="left-col">
+                <h3>🔍 Что анализировать:</h3>
+                <label><input type="checkbox" class="field-checkbox" value="НАЗВАНИЕ АУКЦИОНА" checked> Название аукциона</label>
+                <label><input type="checkbox" class="field-checkbox" value="Начальная цена (НМЦ)" checked> Начальная цена (НМЦ)</label>
+                <label><input type="checkbox" class="field-checkbox" value="ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ" checked> Доп. требования</label>
+                <label><input type="checkbox" class="field-checkbox" value="ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ" checked> Дата окончания</label>
+                <label><input type="checkbox" class="field-checkbox" value="Аванс" checked> Аванс</label>
+                <label><input type="checkbox" class="field-checkbox" value="Обеспечение заявки" checked> Обеспечение заявки</label>
+                <label><input type="checkbox" class="field-checkbox" value="Обеспечение контракта" checked> Обеспечение контракта</label>
+                <label><input type="checkbox" class="field-checkbox" value="Обеспечение гарантийных обязательств" checked> Обеспечение гарантий</label>
+                <label><input type="checkbox" class="field-checkbox" value="Контакты" checked> Контакты</label>
+                <label><input type="checkbox" class="field-checkbox" value="Место исполнения" checked> Место исполнения</label>
+                <label><input type="checkbox" class="field-checkbox" value="ДАТА ОКОНЧАНИЯ КОНТРАКТА" checked> Дата окончания контракта</label>
+            </div>
+
+            <!-- Правая колонка: загрузка файлов -->
+            <div class="right-col">
+                <div class="drop-zone" id="dropZone">
+                    <span class="icon">📁</span>
+                    <p><strong>Нажмите</strong> или <strong>перетащите</strong> файлы сюда</p>
+                    <p style="font-size:13px;margin-top:4px;color:#94a3b8">Поддерживаются .docx, .txt, .xlsx, .xls</p>
+                    <input type="file" id="fileInput" multiple accept=".docx,.txt,.xlsx,.xls">
+                </div>
+
+                <ul id="fileList"></ul>
+
+                <button class="btn" id="analyzeBtn" disabled>🔍 Анализировать файлы</button>
+
+                <div id="status"></div>
+            </div>
         </div>
-        
-        <ul id="fileList"></ul>
-        
-        <button class="btn" id="analyzeBtn" disabled>🔍 Анализировать файлы</button>
-        
-        <div id="status"></div>
     </div>
 
     <script>
@@ -198,9 +241,8 @@
         const fileList = document.getElementById('fileList');
         const analyzeBtn = document.getElementById('analyzeBtn');
         const statusDiv = document.getElementById('status');
-        
         let files = [];
-        
+
         dropZone.addEventListener('click', () => fileInput.click());
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -214,12 +256,12 @@
             dropZone.classList.remove('dragover');
             handleFiles(e.dataTransfer.files);
         });
-        
+
         fileInput.addEventListener('change', (e) => {
             handleFiles(e.target.files);
             fileInput.value = '';
         });
-        
+
         function handleFiles(fileListObj) {
             let added = 0;
             for (let file of fileListObj) {
@@ -236,10 +278,9 @@
                 showStatus(`✅ Добавлено ${added} файлов`, 'success');
                 setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
             }
-            // Кнопка активна ТОЛЬКО если есть файлы
             analyzeBtn.disabled = files.length === 0;
         }
-        
+
         function renderFileList() {
             fileList.innerHTML = files.map((f, i) => `
                 <li>
@@ -251,7 +292,7 @@
                 </li>
             `).join('');
         }
-        
+
         window.removeFile = (index) => {
             files.splice(index, 1);
             renderFileList();
@@ -260,37 +301,51 @@
                 statusDiv.style.display = 'none';
             }
         };
-        
+
         function showStatus(text, type) {
             statusDiv.className = type;
             statusDiv.textContent = text;
             statusDiv.style.display = 'block';
         }
-        
+
+        function getSelectedFields() {
+            const checkboxes = document.querySelectorAll('.field-checkbox:checked');
+            const fields = [];
+            checkboxes.forEach(cb => fields.push(cb.value));
+            return fields;
+        }
+
         analyzeBtn.addEventListener('click', async () => {
             if (files.length === 0) return;
-            
+
+            const selectedFields = getSelectedFields();
+            if (selectedFields.length === 0) {
+                showStatus('⚠️ Выберите хотя бы один пункт для анализа', 'error');
+                return;
+            }
+
             statusDiv.className = 'loading';
             statusDiv.innerHTML = `
                 <div class="spinner"></div>
                 <div>
                     <div class="status-text">⏳ Анализируем ${files.length} файлов...</div>
-                    <div style="font-size:14px;color:#64748b;margin-top:5px">Это может занять до 2 минут</div>
+                    <div style="font-size:13px;color:#64748b;margin-top:4px">Выбрано полей: ${selectedFields.length}</div>
                 </div>
             `;
             statusDiv.style.display = 'flex';
-            
+
             const formData = new FormData();
             files.forEach(f => formData.append('files', f));
-            
+            formData.append('fields', JSON.stringify(selectedFields));
+
             analyzeBtn.disabled = true;
-            
+
             try {
                 const response = await fetch('/analyze', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 if (response.ok) {
                     const blob = await response.blob();
                     const link = document.createElement('a');
@@ -300,7 +355,7 @@
                     link.click();
                     link.remove();
                     URL.revokeObjectURL(link.href);
-                    
+
                     showStatus('✅ Анализ завершён! ZIP-архив скачан.', 'success');
                     files = [];
                     renderFileList();
