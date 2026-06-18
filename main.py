@@ -10,11 +10,20 @@ import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import HTMLResponse, Response
 from urllib.parse import quote
+from fastapi import Depends, HTTPException, status, Request, Response
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+import database
 import openpyxl
 import xlrd
 import uvicorn
 
 app = FastAPI()
+# Инициализация базы
+database.init_db()
+
+# Шаблоны для страниц логина и регистрации
+templates = Jinja2Templates(directory="templates")
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.kodikrouter.ru/v1/chat/completions"
