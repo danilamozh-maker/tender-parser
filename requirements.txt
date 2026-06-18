@@ -5,3 +5,4 @@ jinja2
 python-docx
 requests
 openpyxl
+xlrd
