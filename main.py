@@ -25,9 +25,9 @@ app = FastAPI()
 database.init_db()
 
 # ================= НАСТРОЙКИ =================
-OLLAMA_API_URL = "https://api.kodikrouter.ru/v1/chat/completions"
-API_KEY = "sk-kr_live_E-JvaZzvEh-AnkSjO6d35qcAJ7RCysKt"
-MODEL_NAME = "deepseek/deepseek-chat"
+OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
+API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56"  # ← вставь сюда новый ключ
+MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 # ============================================
 
