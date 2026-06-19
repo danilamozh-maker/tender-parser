@@ -26,7 +26,7 @@ database.init_db()
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.kodikrouter.ru/v1/chat/completions"
-API_KEY = "sk-kr_live_E-JvaZzvEh-AnkSjO6d35qcAJ7RCysKt" # ← ВСТАВЬ СВОЙ КЛЮЧ!
+API_KEY = "sk-kr_live_E-JvaZzvEh-AnkSjO6d35qcAJ7RCysKt"
 MODEL_NAME = "deepseek/deepseek-chat"
 MAX_TENDERS = 15
 # ============================================
@@ -425,7 +425,7 @@ async def analyze_files(
                 doc.add_page_break()
             word_buffer = io.BytesIO()
             doc.save(word_buffer)
-            doc.seek(0)
+            word_buffer.seek(0)
             zip_file.writestr(
                 f"тендеры_результат_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
                 word_buffer.getvalue()
@@ -458,57 +458,77 @@ async def analyze_from_browser(request: Request, data: dict):
     if not tender_urls:
         raise HTTPException(status_code=400, detail="Нет ссылок на тендеры")
     
-    # Ограничим количество тендеров за один раз (например, 5)
-    tender_urls = tender_urls[:5]
+    limit = data.get("limit", 5)
+    selected_fields = data.get("fields", [])
     
+    tender_urls = tender_urls[:limit]
     results = []
     
     for url in tender_urls:
-        # Извлекаем номер закупки из URL
         reg_number = extract_reg_number(url)
         if not reg_number:
-            results.append({
-                "url": url,
-                "error": "Не удалось извлечь номер закупки"
-            })
+            results.append({"url": url, "error": "Не удалось извлечь номер закупки"})
             continue
         
-        # Скачиваем PDF-форму
         pdf_content = download_tender_pdf(reg_number)
         if not pdf_content:
-            results.append({
-                "url": url,
-                "error": "Не удалось скачать PDF"
-            })
+            results.append({"url": url, "error": "Не удалось скачать PDF"})
             continue
         
-        # Извлекаем текст из PDF
         pdf_text = extract_text_from_pdf(pdf_content)
         if not pdf_text:
-            results.append({
-                "url": url,
-                "error": "Не удалось извлечь текст из PDF"
-            })
+            results.append({"url": url, "error": "Не удалось извлечь текст из PDF"})
             continue
         
-        # Отправляем текст в нейросеть для анализа
-        analysis_result = analyze_tender_text(pdf_text)
+        analysis_result = analyze_tender_text(pdf_text, selected_fields)
         results.append({
             "url": url,
             "reg_number": reg_number,
             "analysis": analysis_result
         })
     
-    return {
-        "status": "ok",
-        "count": len(results),
-        "results": results
-    }
+    # ===== ФОРМИРУЕМ WORD-ДОКУМЕНТ И ZIP-АРХИВ =====
+    doc = Document()
+    doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
+    doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+    doc.add_paragraph('=' * 50)
+    
+    for item in results:
+        doc.add_heading(f'Тендер: {item.get("reg_number", "Неизвестно")}', level=1)
+        doc.add_paragraph(f'Ссылка: {item.get("url", "Нет ссылки")}')
+        
+        if "error" in item:
+            doc.add_paragraph(f'❌ Ошибка: {item["error"]}')
+        else:
+            analysis = item.get("analysis", {})
+            for key, value in analysis.items():
+                doc.add_paragraph(f'{key}: {value}')
+        doc.add_page_break()
+    
+    word_buffer = io.BytesIO()
+    doc.save(word_buffer)
+    word_buffer.seek(0)
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+        zip_file.writestr(
+            f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx',
+            word_buffer.getvalue()
+        )
+    
+    zip_buffer.seek(0)
+    
+    filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+    encoded_filename = quote(filename)
+    
+    return Response(
+        zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+    )
 
 # ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
-
 def extract_reg_number(url: str) -> str:
-    """Извлекает номер закупки из URL."""
     match = re.search(r'regNumber=([\d]+)', url)
     if match:
         return match.group(1)
@@ -518,11 +538,8 @@ def extract_reg_number(url: str) -> str:
     return None
 
 def download_tender_pdf(reg_number: str):
-    """Скачивает PDF-форму по номеру закупки."""
     url = f"https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber={reg_number}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
@@ -535,7 +552,6 @@ def download_tender_pdf(reg_number: str):
         return None
 
 def extract_text_from_pdf(pdf_content: bytes) -> str:
-    """Извлекает текст из PDF-файла."""
     try:
         with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
             text = ""
@@ -546,23 +562,29 @@ def extract_text_from_pdf(pdf_content: bytes) -> str:
         print(f"Ошибка при извлечении текста из PDF: {e}")
         return None
 
-def analyze_tender_text(text: str) -> dict:
-    """Отправляет текст в нейросеть для анализа."""
+def analyze_tender_text(text: str, selected_fields: list) -> dict:
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА",
+            "Начальная цена (НМЦ)",
+            "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ",
+            "Аванс",
+            "Обеспечение заявки",
+            "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств",
+            "Контакты",
+            "Место исполнения",
+            "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+    
+    fields_str = "\n".join([f"{field}: " for field in selected_fields])
+    
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
 
-НАЗВАНИЕ АУКЦИОНА: 
-Начальная цена (НМЦ): 
-ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ: 
-ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ: 
-Аванс: 
-Обеспечение заявки: 
-Обеспечение контракта: 
-Обеспечение гарантийных обязательств: 
-Контакты: 
-Место исполнения: 
-ДАТА ОКОНЧАНИЯ КОНТРАКТА: 
+{fields_str}
 
 Вот текст для анализа:
 {text[:8000]}
@@ -570,17 +592,13 @@ def analyze_tender_text(text: str) -> dict:
 Извлеки данные и напиши в указанном формате."""
     
     answer = query_kodik(prompt)
-    
-    # Парсим ответ в словарь
     result = {}
     for line in answer.split('\n'):
         if ':' in line:
             key, value = line.split(':', 1)
             result[key.strip()] = value.strip()
-    
     return result
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-    
