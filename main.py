@@ -269,7 +269,7 @@ def analyze_file(file_path, selected_fields):
 def search_tenders_on_zakupki(query, limit=MAX_TENDERS):
     """Ищет тендеры на zakupki.gov.ru по ключевому слову и возвращает список ссылок."""
     tenders = []
-    search_url = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
+    search_url = "https://www.zakupki.gov.ru/epz/order/extendedsearch/results.html"
     
     # Правильные параметры для поиска (только 44-ФЗ, новые, по актуальности)
     params = {
