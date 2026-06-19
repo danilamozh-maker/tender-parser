@@ -270,35 +270,66 @@ def search_tenders_on_zakupki(query, limit=MAX_TENDERS):
     """Ищет тендеры на zakupki.gov.ru по ключевому слову и возвращает список ссылок."""
     tenders = []
     search_url = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
+    
+    # Правильные параметры для поиска (только 44-ФЗ, новые, по актуальности)
     params = {
         "searchString": query,
-        "pageNumber": 1,
-        "recordsPerPage": limit,
-        "fz44": "on",
-        "fz223": "on",
-        "sortDirection": "false"
+        "pageNumber": "1",
+        "recordsPerPage": str(limit),
+        "fz44": "on", # только 44-ФЗ
+        "fz223": "", # выключаем 223-ФЗ
+        "orderPlacementType": "ALL", # все типы закупок
+        "sortBy": "P_DATE", # сортировка по дате
+        "sortDirection": "false",
+        "publicationDateFrom": "", # дата от
+        "publicationDateTo": "" # дата до
     }
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1"
     }
+    
     try:
+        print(f"🔍 Ищем тендеры по запросу: {query}")
         response = requests.get(search_url, params=params, headers=headers, timeout=30)
+        
         if response.status_code != 200:
-            print(f"Ошибка поиска: HTTP {response.status_code}")
+            print(f"❌ Ошибка HTTP: {response.status_code}")
             return []
+        
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(response.text, 'html.parser')
+        
         # Ищем ссылки на карточки тендеров
+        found_links = []
         for link in soup.find_all('a', href=True):
             href = link.get('href')
-            if href and 'order/view/' in href:
+            if href and 'epz/order/view/' in href:
                 full_url = href if href.startswith('http') else f"https://zakupki.gov.ru{href}"
-                if full_url not in tenders:
-                    tenders.append(full_url)
-        print(f"Найдено {len(tenders)} ссылок на тендеры")
-        return tenders[:limit]
+                if full_url not in found_links:
+                    found_links.append(full_url)
+                    print(f"📎 Найдена ссылка: {full_url}")
+        
+        # Если ссылок не нашлось — попробуем найти через другой селектор
+        if not found_links:
+            for link in soup.find_all('a', href=True):
+                href = link.get('href')
+                if href and '/order/view/' in href:
+                    full_url = href if href.startswith('http') else f"https://zakupki.gov.ru{href}"
+                    if full_url not in found_links:
+                        found_links.append(full_url)
+                        print(f"📎 Найдена ссылка: {full_url}")
+        
+        print(f"✅ Найдено {len(found_links)} ссылок на тендеры")
+        return found_links[:limit]
+        
     except Exception as e:
-        print(f"Ошибка при поиске тендеров: {e}")
+        print(f"❌ Ошибка при поиске тендеров: {e}")
         return []
 
 def download_files_from_tender(tender_url, download_dir):
