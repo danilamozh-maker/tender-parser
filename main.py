@@ -356,6 +356,26 @@ async def suggest_keywords(request: Request, data: dict):
     answer = query_kodik(prompt)
     keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
     return {"keywords": keywords[:7]}
+# ================= ЭНДПОЙНТ ДЛЯ AI-ЧАТА =================
+@app.post("/ask_ai")
+async def ask_ai(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    
+    question = data.get("question", "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Введите вопрос")
+    
+    # Формируем промпт для ИИ (можно заменить под свою задачу)
+    prompt = f"""Ты — консультант по тендерам и бизнес-процессам. Ответь на вопрос пользователя чётко, по делу, без воды.
+
+Вопрос пользователя: {question}
+
+Дай ответ в виде текста (2-4 предложения), который будет полезен для бизнеса."""
+    
+    answer = query_kodik(prompt)
+    return {"answer": answer}
 
 # ================= ГЛАВНАЯ СТРАНИЦА =================
 @app.get("/", response_class=HTMLResponse)
