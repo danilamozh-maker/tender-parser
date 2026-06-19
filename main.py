@@ -16,6 +16,7 @@ import openpyxl
 import xlrd
 import uvicorn
 import database
+import parser # <-- НОВЫЙ МОДУЛЬ ДЛЯ ПАРСИНГА
 
 app = FastAPI()
 
@@ -265,103 +266,7 @@ def analyze_file(file_path, selected_fields):
         return answer
     return "\n".join(filtered_lines)
 
-# ================= ФУНКЦИЯ ПОИСКА ТЕНДЕРОВ С ПРОКСИ =================
-def search_tenders_on_zakupki(query, limit=MAX_TENDERS):
-    """Ищет тендеры на zakupki.gov.ru через прокси"""
-    tenders = []
-    search_url = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
-    
-    params = {
-        "searchString": query,
-        "pageNumber": "1",
-        "recordsPerPage": str(limit),
-        "fz44": "on",
-        "fz223": "",
-        "orderPlacementType": "ALL",
-        "sortBy": "P_DATE",
-        "sortDirection": "false"
-    }
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3"
-    }
-    
-    # ===== ПРОКСИ С АВТОРИЗАЦИЕЙ =====
-    proxies = {
-        'http': 'http://GrNdPl:GdwOJm@81.19.133.207:53545',
-        'https': 'http://GrNdPl:GdwOJm@81.19.133.207:53545'
-    }
-    # ===================================
-    
-    try:
-        print(f"🔍 Ищем тендеры по запросу: {query}")
-        response = requests.get(search_url, params=params, headers=headers, proxies=proxies, timeout=60)
-        
-        if response.status_code != 200:
-            print(f"❌ Ошибка HTTP: {response.status_code}")
-            return []
-        
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        for link in soup.find_all('a', href=True):
-            href = link.get('href')
-            if href and 'epz/order/view/' in href:
-                full_url = href if href.startswith('http') else f"https://zakupki.gov.ru{href}"
-                if full_url not in tenders:
-                    tenders.append(full_url)
-                    print(f"📎 Найдена ссылка: {full_url}")
-        
-        print(f"✅ Найдено {len(tenders)} ссылок на тендеры")
-        return tenders[:limit]
-        
-    except Exception as e:
-        print(f"❌ Ошибка при поиске тендеров: {e}")
-        return []
-
-# ================= СКАЧИВАНИЕ ФАЙЛОВ ПО ТЕНДЕРУ =================
-def download_files_from_tender(tender_url, download_dir):
-    """Скачивает все файлы по тендеру через прокси"""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
-    proxies = {
-        'http': 'http://GrNdPl:GdwOJm@81.19.133.207:53545',
-        'https': 'http://GrNdPl:GdwOJm@81.19.133.207:53545'
-    }
-    
-    try:
-        response = requests.get(tender_url, headers=headers, proxies=proxies, timeout=60)
-        if response.status_code != 200:
-            return []
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.text, 'html.parser')
-        downloaded_files = []
-        for link in soup.find_all('a', href=True):
-            href = link.get('href')
-            if href and any(href.endswith(ext) for ext in ['.pdf', '.docx', '.xlsx', '.doc', '.xls', '.rtf', '.txt']):
-                full_url = href if href.startswith('http') else f"https://zakupki.gov.ru{href}"
-                try:
-                    file_response = requests.get(full_url, headers=headers, proxies=proxies, stream=True, timeout=60)
-                    if file_response.status_code == 200:
-                        filename = f"{len(downloaded_files)+1}_{Path(full_url).name}"
-                        file_path = os.path.join(download_dir, filename)
-                        with open(file_path, 'wb') as f:
-                            for chunk in file_response.iter_content(chunk_size=8192):
-                                f.write(chunk)
-                        downloaded_files.append(file_path)
-                        time.sleep(0.5)
-                except Exception as e:
-                    print(f"Ошибка при скачивании файла: {e}")
-        return downloaded_files
-    except Exception as e:
-        print(f"Ошибка при загрузке страницы тендера: {e}")
-        return []
-
-# ================= НОВЫЙ ЭНДПОЙНТ: ПОИСК ТЕНДЕРОВ =================
+# ================= НОВЫЙ ЭНДПОЙНТ: ПОИСК ТЕНДЕРОВ (ЧЕРЕЗ МОДУЛЬ PARSER) =================
 @app.post("/search_tenders")
 async def search_tenders(request: Request, data: dict):
     user = get_current_user(request)
@@ -373,7 +278,8 @@ async def search_tenders(request: Request, data: dict):
     if not query:
         raise HTTPException(status_code=400, detail="Введите ключевые слова для поиска")
     
-    tender_urls = search_tenders_on_zakupki(query, limit)
+    # Ищем тендеры через модуль parser
+    tender_urls = parser.search_tenders_zakupki(query, limit)
     if not tender_urls:
         return {"detail": "Тендеры по вашему запросу не найдены"}
     
@@ -385,7 +291,10 @@ async def search_tenders(request: Request, data: dict):
         tender_name = f"Тендер_{idx}"
         tender_dir = os.path.join(base_dir, tender_name)
         os.makedirs(tender_dir, exist_ok=True)
-        files = download_files_from_tender(tender_url, tender_dir)
+        
+        # Скачиваем файлы через модуль parser
+        files = parser.download_files_from_tender(tender_url, tender_dir)
+        
         if files:
             combined_text = ""
             for file_path in files:
@@ -398,6 +307,9 @@ async def search_tenders(request: Request, data: dict):
                 "text": combined_text[:5000]
             })
         time.sleep(2)
+    
+    if not results:
+        return {"detail": "Не удалось скачать файлы по найденным тендерам"}
     
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
