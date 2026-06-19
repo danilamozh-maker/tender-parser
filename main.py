@@ -37,7 +37,7 @@ def get_current_user(request: Request):
     user = database.get_user(email)
     return user
 
-# ================= СТРАНИЦЫ АВТОРИЗАЦИИ (без Jinja2) =================
+# ================= СТРАНИЦЫ АВТОРИЗАЦИИ =================
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     error = request.query_params.get("error", "")
@@ -265,38 +265,39 @@ def analyze_file(file_path, selected_fields):
         return answer
     return "\n".join(filtered_lines)
 
-# ================= НОВЫЕ ФУНКЦИИ: ПАРСИНГ ZAKUPKI.GOV.RU =================
+# ================= ФУНКЦИЯ ПОИСКА ТЕНДЕРОВ С ПРОКСИ =================
 def search_tenders_on_zakupki(query, limit=MAX_TENDERS):
-    """Ищет тендеры на zakupki.gov.ru по ключевому слову и возвращает список ссылок."""
+    """Ищет тендеры на zakupki.gov.ru через прокси"""
     tenders = []
-    search_url = "https://www.zakupki.gov.ru/epz/order/extendedsearch/results.html"
+    search_url = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
     
-    # Правильные параметры для поиска (только 44-ФЗ, новые, по актуальности)
     params = {
         "searchString": query,
         "pageNumber": "1",
         "recordsPerPage": str(limit),
-        "fz44": "on", # только 44-ФЗ
-        "fz223": "", # выключаем 223-ФЗ
-        "orderPlacementType": "ALL", # все типы закупок
-        "sortBy": "P_DATE", # сортировка по дате
-        "sortDirection": "false",
-        "publicationDateFrom": "", # дата от
-        "publicationDateTo": "" # дата до
+        "fz44": "on",
+        "fz223": "",
+        "orderPlacementType": "ALL",
+        "sortBy": "P_DATE",
+        "sortDirection": "false"
     }
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
+        "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3"
     }
+    
+    # ===== ПРОКСИ С АВТОРИЗАЦИЕЙ =====
+    proxies = {
+        'http': 'http://GrNdPl:GdwOJm@81.19.133.207:53545',
+        'https': 'http://GrNdPl:GdwOJm@81.19.133.207:53545'
+    }
+    # ===================================
     
     try:
         print(f"🔍 Ищем тендеры по запросу: {query}")
-        response = requests.get(search_url, params=params, headers=headers, timeout=30)
+        response = requests.get(search_url, params=params, headers=headers, proxies=proxies, timeout=60)
         
         if response.status_code != 200:
             print(f"❌ Ошибка HTTP: {response.status_code}")
@@ -305,60 +306,54 @@ def search_tenders_on_zakupki(query, limit=MAX_TENDERS):
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Ищем ссылки на карточки тендеров
-        found_links = []
         for link in soup.find_all('a', href=True):
             href = link.get('href')
             if href and 'epz/order/view/' in href:
                 full_url = href if href.startswith('http') else f"https://zakupki.gov.ru{href}"
-                if full_url not in found_links:
-                    found_links.append(full_url)
+                if full_url not in tenders:
+                    tenders.append(full_url)
                     print(f"📎 Найдена ссылка: {full_url}")
         
-        # Если ссылок не нашлось — попробуем найти через другой селектор
-        if not found_links:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href')
-                if href and '/order/view/' in href:
-                    full_url = href if href.startswith('http') else f"https://zakupki.gov.ru{href}"
-                    if full_url not in found_links:
-                        found_links.append(full_url)
-                        print(f"📎 Найдена ссылка: {full_url}")
-        
-        print(f"✅ Найдено {len(found_links)} ссылок на тендеры")
-        return found_links[:limit]
+        print(f"✅ Найдено {len(tenders)} ссылок на тендеры")
+        return tenders[:limit]
         
     except Exception as e:
         print(f"❌ Ошибка при поиске тендеров: {e}")
         return []
 
+# ================= СКАЧИВАНИЕ ФАЙЛОВ ПО ТЕНДЕРУ =================
 def download_files_from_tender(tender_url, download_dir):
-    """Скачивает все файлы по тендеру и сохраняет их в указанную папку."""
-    headers = {"User-Agent": "Mozilla/5.0"}
+    """Скачивает все файлы по тендеру через прокси"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    proxies = {
+        'http': 'http://GrNdPl:GdwOJm@81.19.133.207:53545',
+        'https': 'http://GrNdPl:GdwOJm@81.19.133.207:53545'
+    }
+    
     try:
-        response = requests.get(tender_url, headers=headers, timeout=30)
+        response = requests.get(tender_url, headers=headers, proxies=proxies, timeout=60)
         if response.status_code != 200:
             return []
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(response.text, 'html.parser')
         downloaded_files = []
-        # Ищем ссылки на файлы
         for link in soup.find_all('a', href=True):
             href = link.get('href')
             if href and any(href.endswith(ext) for ext in ['.pdf', '.docx', '.xlsx', '.doc', '.xls', '.rtf', '.txt']):
-                # Пропускаем слишком большие файлы (больше 20 МБ)
                 full_url = href if href.startswith('http') else f"https://zakupki.gov.ru{href}"
                 try:
-                    file_response = requests.get(full_url, headers=headers, stream=True, timeout=60)
+                    file_response = requests.get(full_url, headers=headers, proxies=proxies, stream=True, timeout=60)
                     if file_response.status_code == 200:
-                        # Генерируем имя файла
                         filename = f"{len(downloaded_files)+1}_{Path(full_url).name}"
                         file_path = os.path.join(download_dir, filename)
                         with open(file_path, 'wb') as f:
                             for chunk in file_response.iter_content(chunk_size=8192):
                                 f.write(chunk)
                         downloaded_files.append(file_path)
-                        time.sleep(0.5) # пауза между скачиваниями
+                        time.sleep(0.5)
                 except Exception as e:
                     print(f"Ошибка при скачивании файла: {e}")
         return downloaded_files
@@ -378,12 +373,10 @@ async def search_tenders(request: Request, data: dict):
     if not query:
         raise HTTPException(status_code=400, detail="Введите ключевые слова для поиска")
     
-    # 1. Ищем тендеры
     tender_urls = search_tenders_on_zakupki(query, limit)
     if not tender_urls:
         return {"detail": "Тендеры по вашему запросу не найдены"}
     
-    # 2. Создаём временную папку для всех тендеров
     base_dir = f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(base_dir, exist_ok=True)
     
@@ -394,21 +387,18 @@ async def search_tenders(request: Request, data: dict):
         os.makedirs(tender_dir, exist_ok=True)
         files = download_files_from_tender(tender_url, tender_dir)
         if files:
-            # 3. Анализируем скачанные файлы
             combined_text = ""
             for file_path in files:
                 text = read_docx(file_path) if file_path.endswith('.docx') else read_txt(file_path) if file_path.endswith('.txt') else read_excel(file_path)
                 if text and not text.startswith("Ошибка"):
                     combined_text += text + "\n"
-            # Сохраняем результат для отчёта
             results.append({
                 "tender_name": tender_name,
                 "files": files,
-                "text": combined_text[:5000] # ограничиваем длину
+                "text": combined_text[:5000]
             })
-        time.sleep(2) # пауза между тендерами
+        time.sleep(2)
     
-    # 4. Формируем ZIP-архив с отчётами
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
         for res in results:
@@ -425,7 +415,6 @@ async def search_tenders(request: Request, data: dict):
     zip_buffer.seek(0)
     filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded_filename = quote(filename)
-    # Удаляем временную папку
     if os.path.exists(base_dir):
         shutil.rmtree(base_dir)
     return Response(
@@ -434,7 +423,7 @@ async def search_tenders(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= НОВЫЙ ЭНДПОЙНТ: ПОДБОР КЛЮЧЕВЫХ СЛОВ ЧЕРЕЗ ИИ =================
+# ================= НОВЫЙ ЭНДПОЙНТ: ПОДБОР КЛЮЧЕВЫХ СЛОВ =================
 @app.post("/suggest_keywords")
 async def suggest_keywords(request: Request, data: dict):
     user = get_current_user(request)
@@ -453,7 +442,6 @@ async def suggest_keywords(request: Request, data: dict):
 Выдай ТОЛЬКО список слов через запятую, без лишнего текста."""
     
     answer = query_kodik(prompt)
-    # Парсим ответ ИИ в список ключевых слов
     keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
     return {"keywords": keywords[:7]}
 
@@ -467,7 +455,7 @@ async def main(request: Request):
         html_content = f.read()
     return HTMLResponse(content=html_content)
 
-# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ФАЙЛОВ (ручной) =================
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ФАЙЛОВ =================
 @app.post("/analyze")
 async def analyze_files(
     request: Request,
