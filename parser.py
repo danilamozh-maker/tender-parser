@@ -12,31 +12,26 @@ HEADERS = {
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 
-# ===== ФУНКЦИЯ ДЛЯ ЗАГРУЗКИ ЧЕРЕЗ ALLORIGINS =====
-def fetch_via_allorigins(url):
+# ===== ФУНКЦИЯ ДЛЯ ЗАГРУЗКИ ЧЕРЕЗ CORS PROXY =====
+def fetch_via_proxy(url):
     """
-    Загружает страницу через AllOrigins (бесплатный прокси-сервис).
-    Возвращает HTML-код страницы.
+    Загружает страницу через corsproxy.io (бесплатный HTTPS-прокси).
     """
     try:
         encoded_url = quote(url, safe='')
-        proxy_url = f"https://api.allorigins.win/raw?url={encoded_url}"
+        proxy_url = f"https://corsproxy.io/?{encoded_url}"
         response = requests.get(proxy_url, headers=HEADERS, timeout=30)
         if response.status_code == 200:
             return response.text
         else:
-            print(f"❌ Ошибка AllOrigins: {response.status_code}")
+            print(f"❌ Ошибка прокси: {response.status_code}")
             return None
     except Exception as e:
-        print(f"❌ Ошибка при запросе через AllOrigins: {e}")
+        print(f"❌ Ошибка при запросе через прокси: {e}")
         return None
 
 # ===== ПОИСК ТЕНДЕРОВ НА ZAKUPKI.GOV.RU =====
 def search_tenders_zakupki(query, limit=10):
-    """
-    Ищет тендеры на zakupki.gov.ru по ключевым словам.
-    Использует AllOrigins для обхода блокировки.
-    """
     print(f"🔍 Ищем тендеры по запросу: {query}")
     
     search_url = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
@@ -51,19 +46,15 @@ def search_tenders_zakupki(query, limit=10):
         "sortDirection": "false"
     }
     
-    # Формируем полный URL с параметрами
     full_url = search_url + "?" + "&".join([f"{k}={v}" for k, v in params.items()])
-    
-    # Загружаем через AllOrigins
-    html = fetch_via_allorigins(full_url)
+    html = fetch_via_proxy(full_url)
     if not html:
-        print("❌ Не удалось загрузить страницу через AllOrigins")
+        print("❌ Не удалось загрузить страницу через прокси")
         return []
     
     try:
         soup = BeautifulSoup(html, 'html.parser')
         tenders = []
-        
         for link in soup.find_all('a', href=True):
             href = link.get('href')
             if href and 'epz/order/view/' in href:
@@ -71,37 +62,25 @@ def search_tenders_zakupki(query, limit=10):
                 if full_url not in tenders:
                     tenders.append(full_url)
                     print(f"📎 Найдена ссылка: {full_url}")
-        
         print(f"✅ Найдено {len(tenders)} тендеров")
         return tenders[:limit]
-        
     except Exception as e:
         print(f"❌ Ошибка при парсинге: {e}")
         return []
 
-# ===== СКАЧИВАНИЕ ФАЙЛОВ ПО ТЕНДЕРУ =====
+# ===== СКАЧИВАНИЕ ФАЙЛОВ =====
 def download_files_from_tender(tender_url, download_dir):
-    """
-    Скачивает все доступные файлы по тендеру и сохраняет в указанную папку.
-    Возвращает список путей к скачанным файлам.
-    """
     print(f"📥 Скачиваем файлы из: {tender_url}")
-    
-    # Загружаем страницу тендера через AllOrigins
-    html = fetch_via_allorigins(tender_url)
+    html = fetch_via_proxy(tender_url)
     if not html:
-        print("❌ Не удалось загрузить страницу тендера")
         return []
-    
     soup = BeautifulSoup(html, 'html.parser')
     downloaded_files = []
-    
     for link in soup.find_all('a', href=True):
         href = link.get('href')
         if href and any(href.endswith(ext) for ext in ['.pdf', '.docx', '.xlsx', '.doc', '.xls', '.rtf', '.txt']):
             full_url = href if href.startswith('http') else f"https://zakupki.gov.ru{href}"
             try:
-                # Пробуем скачать напрямую (без прокси, так как сам файл может быть доступен)
                 file_response = requests.get(full_url, headers=HEADERS, stream=True, timeout=60)
                 if file_response.status_code == 200:
                     filename = f"{len(downloaded_files)+1}_{Path(full_url).name}"
@@ -113,10 +92,7 @@ def download_files_from_tender(tender_url, download_dir):
                     downloaded_files.append(file_path)
                     print(f" ✅ Скачан: {filename}")
                     time.sleep(0.3)
-                else:
-                    print(f" ❌ Ошибка скачивания: {file_response.status_code}")
             except Exception as e:
                 print(f" ❌ Ошибка скачивания: {e}")
-    
     print(f"📦 Всего скачано файлов: {len(downloaded_files)}")
     return downloaded_files
