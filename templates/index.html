@@ -19,7 +19,7 @@
             padding: 40px;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 1000px;
+            max-width: 1100px;
             width: 100%;
         }
         .header {
@@ -47,7 +47,7 @@
         }
         .logout-btn:hover { background: #dc2626; }
         
-        /* ===== НОВЫЙ БЛОК ПОИСКА ТЕНДЕРОВ ===== */
+        /* ===== НОВЫЙ БЛОК ПОИСКА ТЕНДЕРОВ (GovRider) ===== */
         .search-section {
             background: #f8fafc;
             padding: 20px 24px;
@@ -66,12 +66,12 @@
         .search-row {
             display: flex;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 10px;
             align-items: center;
         }
         .search-row input[type="text"] {
             flex: 2;
-            min-width: 200px;
+            min-width: 180px;
             padding: 10px 14px;
             border: 2px solid #e2e8f0;
             border-radius: 10px;
@@ -82,8 +82,20 @@
         .search-row input[type="text"]:focus {
             border-color: #667eea;
         }
+        .search-row select {
+            padding: 10px 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 14px;
+            background: white;
+            outline: none;
+            cursor: pointer;
+        }
+        .search-row select:focus {
+            border-color: #667eea;
+        }
         .search-row input[type="number"] {
-            width: 80px;
+            width: 70px;
             padding: 10px 8px;
             border: 2px solid #e2e8f0;
             border-radius: 10px;
@@ -93,13 +105,14 @@
         .btn-search {
             background: #10b981;
             color: white;
-            padding: 10px 24px;
+            padding: 10px 22px;
             border: none;
             border-radius: 10px;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
             transition: 0.2s;
+            white-space: nowrap;
         }
         .btn-search:hover:not(:disabled) {
             background: #059669;
@@ -112,16 +125,21 @@
         .btn-ai {
             background: #8b5cf6;
             color: white;
-            padding: 10px 18px;
+            padding: 10px 16px;
             border: none;
             border-radius: 10px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
             transition: 0.2s;
+            white-space: nowrap;
         }
         .btn-ai:hover:not(:disabled) {
             background: #7c3aed;
+        }
+        .btn-ai:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
         }
         .search-status {
             margin-top: 12px;
@@ -136,7 +154,7 @@
         }
         .keywords-suggestions .tag {
             background: #e2e8f0;
-            padding: 4px 12px;
+            padding: 4px 14px;
             border-radius: 20px;
             font-size: 13px;
             cursor: pointer;
@@ -313,11 +331,12 @@
         .status-text {
             font-weight: 500;
         }
-        @media (max-width: 700px) {
+        @media (max-width: 800px) {
             .main-row { flex-direction: column; }
             .left-col { flex: 1; }
             .search-row { flex-direction: column; align-items: stretch; }
             .search-row input[type="number"] { width: 100%; }
+            .search-row select { width: 100%; }
         }
     </style>
 </head>
@@ -330,14 +349,35 @@
         <a href="/logout" class="logout-btn">🚪 Выйти</a>
     </div>
 
-    <!-- ===== НОВЫЙ БЛОК — ПОИСК ТЕНДЕРОВ НА ZAKUPKI.GOV.RU ===== -->
+    <!-- ===== НОВЫЙ БЛОК — ПОИСК ТЕНДЕРОВ ЧЕРЕЗ GovRider ===== -->
     <div class="search-section">
-        <h3>🔍 Найти тендеры на zakupki.gov.ru</h3>
+        <h3>🌍 Найти тендеры по всему миру (GovRider)</h3>
         <div class="search-row">
             <input type="text" id="searchQuery" placeholder="Например: строительство школы">
+            
+            <select id="searchCountry">
+                <option value="Russia">🇷🇺 Россия</option>
+                <option value="Kazakhstan">🇰🇿 Казахстан</option>
+                <option value="Belarus">🇧🇾 Беларусь</option>
+                <option value="Ukraine">🇺🇦 Украина</option>
+                <option value="All">🌍 Все страны</option>
+            </select>
+            
+            <select id="searchCity">
+                <option value="">Все города</option>
+                <option value="Moscow">Москва</option>
+                <option value="Saint Petersburg">Санкт-Петербург</option>
+                <option value="Kazan">Казань</option>
+                <option value="Novosibirsk">Новосибирск</option>
+                <option value="Yekaterinburg">Екатеринбург</option>
+                <option value="Nizhny Novgorod">Нижний Новгород</option>
+                <option value="Sochi">Сочи</option>
+                <option value="Vladivostok">Владивосток</option>
+            </select>
+            
             <input type="number" id="searchLimit" value="10" min="1" max="15">
             <button class="btn-search" id="searchBtn">Найти тендеры</button>
-            <button class="btn-ai" id="aiSuggestBtn">🧠 Подобрать ключевые слова</button>
+            <button class="btn-ai" id="aiSuggestBtn">🧠 Подобрать</button>
         </div>
         <div class="search-status" id="searchStatus">Введите запрос и нажмите «Найти тендеры»</div>
         <div class="keywords-suggestions" id="keywordsSuggestions"></div>
@@ -377,9 +417,11 @@
 
 <script>
     // ========================================================
-    // 1. ОБРАБОТЧИКИ ДЛЯ ПОИСКА ТЕНДЕРОВ
+    // 1. ОБРАБОТЧИКИ ДЛЯ ПОИСКА ТЕНДЕРОВ ЧЕРЕЗ GovRider
     // ========================================================
     const searchQuery = document.getElementById('searchQuery');
+    const searchCountry = document.getElementById('searchCountry');
+    const searchCity = document.getElementById('searchCity');
     const searchLimit = document.getElementById('searchLimit');
     const searchBtn = document.getElementById('searchBtn');
     const searchStatus = document.getElementById('searchStatus');
@@ -394,6 +436,8 @@
             searchStatus.style.color = '#ef4444';
             return;
         }
+        const country = searchCountry.value;
+        const city = searchCity.value;
         const limit = parseInt(searchLimit.value) || 10;
 
         searchStatus.textContent = `⏳ Ищем тендеры по запросу "${query}"...`;
@@ -404,7 +448,7 @@
             const response = await fetch('/search_tenders', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query, limit })
+                body: JSON.stringify({ query, country, city, limit })
             });
             const data = await response.json();
             if (response.ok) {
@@ -444,9 +488,8 @@
                 keywordsDiv.innerHTML = data.keywords.map(k =>
                     `<span class="tag active" onclick="toggleKeyword(this)">${k}</span>`
                 ).join('');
-                searchStatus.textContent = '✅ Выберите нужные ключевые слова (кликните, чтобы убрать/добавить), затем нажмите «Найти тендеры»';
+                searchStatus.textContent = '✅ Выберите нужные ключевые слова, затем нажмите «Найти тендеры»';
                 searchStatus.style.color = '#166534';
-                // подставляем первое слово в поле поиска для удобства
                 searchQuery.value = data.keywords.slice(0, 3).join(' ');
             } else {
                 searchStatus.textContent = '❌ Не удалось подобрать ключевые слова. Попробуйте иначе описать деятельность.';
@@ -467,7 +510,7 @@
     }
 
     // ========================================================
-    // 2. СТАРЫЙ КОД — ЗАГРУЗКА ФАЙЛОВ (без изменений)
+    // 2. СТАРЫЙ КОД — ЗАГРУЗКА ФАЙЛОВ
     // ========================================================
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
