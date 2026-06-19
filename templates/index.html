@@ -19,7 +19,7 @@
             padding: 40px;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 900px;
+            max-width: 1000px;
             width: 100%;
         }
         .header {
@@ -30,14 +30,10 @@
             flex-wrap: wrap;
             gap: 10px;
         }
-        .header-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
         .header-title h1 {
             margin: 0;
             color: #333;
+            font-size: 24px;
         }
         .logout-btn {
             background: #ef4444;
@@ -49,12 +45,117 @@
             font-size: 14px;
             transition: 0.2s;
         }
-        .logout-btn:hover {
-            background: #dc2626;
+        .logout-btn:hover { background: #dc2626; }
+        
+        /* ===== НОВЫЙ БЛОК ПОИСКА ТЕНДЕРОВ ===== */
+        .search-section {
+            background: #f8fafc;
+            padding: 20px 24px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+            border: 1px solid #e2e8f0;
         }
+        .search-section h3 {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .search-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+        .search-row input[type="text"] {
+            flex: 2;
+            min-width: 200px;
+            padding: 10px 14px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 15px;
+            outline: none;
+            transition: 0.2s;
+        }
+        .search-row input[type="text"]:focus {
+            border-color: #667eea;
+        }
+        .search-row input[type="number"] {
+            width: 80px;
+            padding: 10px 8px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 15px;
+            text-align: center;
+        }
+        .btn-search {
+            background: #10b981;
+            color: white;
+            padding: 10px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn-search:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+        .btn-search:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+        .btn-ai {
+            background: #8b5cf6;
+            color: white;
+            padding: 10px 18px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn-ai:hover:not(:disabled) {
+            background: #7c3aed;
+        }
+        .search-status {
+            margin-top: 12px;
+            font-size: 14px;
+            color: #475569;
+        }
+        .keywords-suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .keywords-suggestions .tag {
+            background: #e2e8f0;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: 0.2s;
+            user-select: none;
+        }
+        .keywords-suggestions .tag:hover {
+            background: #cbd5e1;
+        }
+        .keywords-suggestions .tag.active {
+            background: #667eea;
+            color: white;
+        }
+
+        /* ===== СТАРЫЙ БЛОК АНАЛИЗА ФАЙЛОВ ===== */
         .subtitle {
             color: #666;
-            margin-bottom: 25px;
+            margin-bottom: 20px;
+            font-size: 15px;
         }
         .main-row {
             display: flex;
@@ -215,192 +316,269 @@
         @media (max-width: 700px) {
             .main-row { flex-direction: column; }
             .left-col { flex: 1; }
+            .search-row { flex-direction: column; align-items: stretch; }
+            .search-row input[type="number"] { width: 100%; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="header-title">
-                <h1>📄 Тендерный парсер</h1>
-            </div>
-            <a href="/logout" class="logout-btn">🚪 Выйти</a>
-        </div>
-        <p class="subtitle">Выберите параметры и загрузите файлы для анализа</p>
+<div class="container">
 
-        <div class="main-row">
-            <div class="left-col">
-                <h3>🔍 Что анализировать:</h3>
-                <label><input type="checkbox" class="field-checkbox" value="НАЗВАНИЕ АУКЦИОНА" checked> Название аукциона</label>
-                <label><input type="checkbox" class="field-checkbox" value="Начальная цена (НМЦ)" checked> Начальная цена (НМЦ)</label>
-                <label><input type="checkbox" class="field-checkbox" value="ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ" checked> Доп. требования</label>
-                <label><input type="checkbox" class="field-checkbox" value="ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ" checked> Дата окончания</label>
-                <label><input type="checkbox" class="field-checkbox" value="Аванс" checked> Аванс</label>
-                <label><input type="checkbox" class="field-checkbox" value="Обеспечение заявки" checked> Обеспечение заявки</label>
-                <label><input type="checkbox" class="field-checkbox" value="Обеспечение контракта" checked> Обеспечение контракта</label>
-                <label><input type="checkbox" class="field-checkbox" value="Обеспечение гарантийных обязательств" checked> Обеспечение гарантий</label>
-                <label><input type="checkbox" class="field-checkbox" value="Контакты" checked> Контакты</label>
-                <label><input type="checkbox" class="field-checkbox" value="Место исполнения" checked> Место исполнения</label>
-                <label><input type="checkbox" class="field-checkbox" value="ДАТА ОКОНЧАНИЯ КОНТРАКТА" checked> Дата окончания контракта</label>
-            </div>
-
-            <div class="right-col">
-                <div class="drop-zone" id="dropZone">
-                    <span class="icon">📁</span>
-                    <p><strong>Нажмите</strong> или <strong>перетащите</strong> файлы сюда</p>
-                    <p style="font-size:13px;margin-top:4px;color:#94a3b8">Поддерживаются .docx, .txt, .xlsx, .xls</p>
-                    <input type="file" id="fileInput" multiple accept=".docx,.txt,.xlsx,.xls">
-                </div>
-
-                <ul id="fileList"></ul>
-
-                <button class="btn" id="analyzeBtn" disabled>🔍 Анализировать файлы</button>
-
-                <div id="status"></div>
-            </div>
-        </div>
+    <!-- ===== ШАПКА ===== -->
+    <div class="header">
+        <div class="header-title"><h1>📄 Тендерный парсер</h1></div>
+        <a href="/logout" class="logout-btn">🚪 Выйти</a>
     </div>
 
-    <script>
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('fileInput');
-        const fileList = document.getElementById('fileList');
-        const analyzeBtn = document.getElementById('analyzeBtn');
-        const statusDiv = document.getElementById('status');
-        let files = [];
+    <!-- ===== НОВЫЙ БЛОК — ПОИСК ТЕНДЕРОВ НА ZAKUPKI.GOV.RU ===== -->
+    <div class="search-section">
+        <h3>🔍 Найти тендеры на zakupki.gov.ru</h3>
+        <div class="search-row">
+            <input type="text" id="searchQuery" placeholder="Например: строительство школы">
+            <input type="number" id="searchLimit" value="10" min="1" max="15">
+            <button class="btn-search" id="searchBtn">Найти тендеры</button>
+            <button class="btn-ai" id="aiSuggestBtn">🧠 Подобрать ключевые слова</button>
+        </div>
+        <div class="search-status" id="searchStatus">Введите запрос и нажмите «Найти тендеры»</div>
+        <div class="keywords-suggestions" id="keywordsSuggestions"></div>
+    </div>
 
-        dropZone.addEventListener('click', () => fileInput.click());
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('dragover');
-        });
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('dragover');
-        });
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
-            handleFiles(e.dataTransfer.files);
-        });
+    <!-- ===== СТАРЫЙ БЛОК — РУЧНАЯ ЗАГРУЗКА ФАЙЛОВ ===== -->
+    <p class="subtitle">Или выберите параметры и загрузите файлы для анализа вручную</p>
+    <div class="main-row">
+        <div class="left-col">
+            <h3>🔍 Что анализировать:</h3>
+            <label><input type="checkbox" class="field-checkbox" value="НАЗВАНИЕ АУКЦИОНА" checked> Название аукциона</label>
+            <label><input type="checkbox" class="field-checkbox" value="Начальная цена (НМЦ)" checked> Начальная цена (НМЦ)</label>
+            <label><input type="checkbox" class="field-checkbox" value="ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ" checked> Доп. требования</label>
+            <label><input type="checkbox" class="field-checkbox" value="ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ" checked> Дата окончания</label>
+            <label><input type="checkbox" class="field-checkbox" value="Аванс" checked> Аванс</label>
+            <label><input type="checkbox" class="field-checkbox" value="Обеспечение заявки" checked> Обеспечение заявки</label>
+            <label><input type="checkbox" class="field-checkbox" value="Обеспечение контракта" checked> Обеспечение контракта</label>
+            <label><input type="checkbox" class="field-checkbox" value="Обеспечение гарантийных обязательств" checked> Обеспечение гарантий</label>
+            <label><input type="checkbox" class="field-checkbox" value="Контакты" checked> Контакты</label>
+            <label><input type="checkbox" class="field-checkbox" value="Место исполнения" checked> Место исполнения</label>
+            <label><input type="checkbox" class="field-checkbox" value="ДАТА ОКОНЧАНИЯ КОНТРАКТА" checked> Дата окончания контракта</label>
+        </div>
 
-        fileInput.addEventListener('change', (e) => {
-            handleFiles(e.target.files);
-            fileInput.value = '';
-        });
+        <div class="right-col">
+            <div class="drop-zone" id="dropZone">
+                <span class="icon">📁</span>
+                <p><strong>Нажмите</strong> или <strong>перетащите</strong> файлы сюда</p>
+                <p style="font-size:13px;margin-top:4px;color:#94a3b8">Поддерживаются .docx, .txt, .xlsx, .xls</p>
+                <input type="file" id="fileInput" multiple accept=".docx,.txt,.xlsx,.xls">
+            </div>
+            <ul id="fileList"></ul>
+            <button class="btn" id="analyzeBtn" disabled>🔍 Анализировать файлы</button>
+            <div id="status"></div>
+        </div>
+    </div>
+</div>
 
-        function handleFiles(fileListObj) {
-            let added = 0;
-            for (let file of fileListObj) {
-                const ext = file.name.split('.').pop().toLowerCase();
-                if (ext === 'docx' || ext === 'txt' || ext === 'xlsx' || ext === 'xls') {
-                    files.push(file);
-                    added++;
-                } else {
-                    showStatus(`⚠️ Файл "${file.name}" пропущен (неподдерживаемый формат)`, 'error');
-                }
-            }
-            if (added > 0) {
-                renderFileList();
-                showStatus(`✅ Добавлено ${added} файлов`, 'success');
-                setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
-            }
-            analyzeBtn.disabled = files.length === 0;
+<script>
+    // ========================================================
+    // 1. ОБРАБОТЧИКИ ДЛЯ ПОИСКА ТЕНДЕРОВ
+    // ========================================================
+    const searchQuery = document.getElementById('searchQuery');
+    const searchLimit = document.getElementById('searchLimit');
+    const searchBtn = document.getElementById('searchBtn');
+    const searchStatus = document.getElementById('searchStatus');
+    const keywordsDiv = document.getElementById('keywordsSuggestions');
+    const aiSuggestBtn = document.getElementById('aiSuggestBtn');
+
+    // Кнопка "Найти тендеры"
+    searchBtn.addEventListener('click', async () => {
+        const query = searchQuery.value.trim();
+        if (!query) {
+            searchStatus.textContent = '⚠️ Введите ключевые слова для поиска';
+            searchStatus.style.color = '#ef4444';
+            return;
         }
+        const limit = parseInt(searchLimit.value) || 10;
 
-        function renderFileList() {
-            fileList.innerHTML = files.map((f, i) => `
-                <li>
-                    <span>
-                        <span class="file-name">📄 ${f.name}</span>
-                        <span class="file-size">(${(f.size/1024).toFixed(1)} KB)</span>
-                    </span>
-                    <button class="remove-btn" onclick="removeFile(${i})">✕</button>
-                </li>
-            `).join('');
+        searchStatus.textContent = `⏳ Ищем тендеры по запросу "${query}"...`;
+        searchStatus.style.color = '#475569';
+        searchBtn.disabled = true;
+
+        try {
+            const response = await fetch('/search_tenders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, limit })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                searchStatus.textContent = `✅ Найдено тендеров: ${data.count || 0}. Скачивание и анализ запущены. Результат придёт в ZIP-архиве.`;
+                searchStatus.style.color = '#166534';
+            } else {
+                searchStatus.textContent = `❌ Ошибка: ${data.detail || 'Неизвестная ошибка'}`;
+                searchStatus.style.color = '#991b1b';
+            }
+        } catch (e) {
+            searchStatus.textContent = `❌ Ошибка соединения: ${e.message}`;
+            searchStatus.style.color = '#991b1b';
         }
+        searchBtn.disabled = false;
+    });
 
-        window.removeFile = (index) => {
-            files.splice(index, 1);
+    // Кнопка "Подобрать ключевые слова" (ИИ-помощник)
+    aiSuggestBtn.addEventListener('click', async () => {
+        const query = searchQuery.value.trim();
+        if (!query) {
+            searchStatus.textContent = '⚠️ Сначала напишите, чем занимается ваша компания';
+            searchStatus.style.color = '#ef4444';
+            return;
+        }
+        searchStatus.textContent = '🧠 ИИ подбирает ключевые слова...';
+        searchStatus.style.color = '#475569';
+        aiSuggestBtn.disabled = true;
+
+        try {
+            const response = await fetch('/suggest_keywords', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ description: query })
+            });
+            const data = await response.json();
+            if (response.ok && data.keywords && data.keywords.length > 0) {
+                keywordsDiv.innerHTML = data.keywords.map(k =>
+                    `<span class="tag active" onclick="toggleKeyword(this)">${k}</span>`
+                ).join('');
+                searchStatus.textContent = '✅ Выберите нужные ключевые слова (кликните, чтобы убрать/добавить), затем нажмите «Найти тендеры»';
+                searchStatus.style.color = '#166534';
+                // подставляем первое слово в поле поиска для удобства
+                searchQuery.value = data.keywords.slice(0, 3).join(' ');
+            } else {
+                searchStatus.textContent = '❌ Не удалось подобрать ключевые слова. Попробуйте иначе описать деятельность.';
+                searchStatus.style.color = '#991b1b';
+            }
+        } catch (e) {
+            searchStatus.textContent = `❌ Ошибка: ${e.message}`;
+            searchStatus.style.color = '#991b1b';
+        }
+        aiSuggestBtn.disabled = false;
+    });
+
+    function toggleKeyword(el) {
+        el.classList.toggle('active');
+        const active = document.querySelectorAll('.keywords-suggestions .tag.active');
+        const words = Array.from(active).map(tag => tag.textContent.trim());
+        searchQuery.value = words.join(' ');
+    }
+
+    // ========================================================
+    // 2. СТАРЫЙ КОД — ЗАГРУЗКА ФАЙЛОВ (без изменений)
+    // ========================================================
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileList = document.getElementById('fileList');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const statusDiv = document.getElementById('status');
+    let files = [];
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => {
+        handleFiles(e.target.files);
+        fileInput.value = '';
+    });
+
+    function handleFiles(fileListObj) {
+        let added = 0;
+        for (let file of fileListObj) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (['docx','txt','xlsx','xls'].includes(ext)) {
+                files.push(file);
+                added++;
+            } else {
+                showStatus(`⚠️ Файл "${file.name}" пропущен (неподдерживаемый формат)`, 'error');
+            }
+        }
+        if (added > 0) {
             renderFileList();
+            showStatus(`✅ Добавлено ${added} файлов`, 'success');
+            setTimeout(() => { statusDiv.style.display = 'none'; }, 2000);
+        }
+        analyzeBtn.disabled = files.length === 0;
+    }
+
+    function renderFileList() {
+        fileList.innerHTML = files.map((f, i) => `
+            <li>
+                <span><span class="file-name">📄 ${f.name}</span><span class="file-size">(${(f.size/1024).toFixed(1)} KB)</span></span>
+                <button class="remove-btn" onclick="removeFile(${i})">✕</button>
+            </li>
+        `).join('');
+    }
+
+    window.removeFile = (index) => {
+        files.splice(index, 1);
+        renderFileList();
+        analyzeBtn.disabled = files.length === 0;
+        if (files.length === 0) statusDiv.style.display = 'none';
+    };
+
+    function showStatus(text, type) {
+        statusDiv.className = type;
+        statusDiv.textContent = text;
+        statusDiv.style.display = 'block';
+    }
+
+    function getSelectedFields() {
+        return Array.from(document.querySelectorAll('.field-checkbox:checked')).map(cb => cb.value);
+    }
+
+    analyzeBtn.addEventListener('click', async () => {
+        if (files.length === 0) return;
+        const selectedFields = getSelectedFields();
+        if (selectedFields.length === 0) {
+            showStatus('⚠️ Выберите хотя бы один пункт для анализа', 'error');
+            return;
+        }
+        statusDiv.className = 'loading';
+        statusDiv.innerHTML = `<div class="spinner"></div><div><div class="status-text">⏳ Анализируем ${files.length} файлов...</div><div style="font-size:13px;color:#64748b;margin-top:4px">Выбрано полей: ${selectedFields.length}</div></div>`;
+        statusDiv.style.display = 'flex';
+        const formData = new FormData();
+        files.forEach(f => formData.append('files', f));
+        formData.append('fields', JSON.stringify(selectedFields));
+        analyzeBtn.disabled = true;
+        try {
+            const response = await fetch('/analyze', { method: 'POST', body: formData });
+            if (response.ok) {
+                const blob = await response.blob();
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `результаты_анализа_${new Date().toISOString().slice(0,10)}.zip`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(link.href);
+                showStatus('✅ Анализ завершён! ZIP-архив скачан.', 'success');
+                files = [];
+                renderFileList();
+                analyzeBtn.disabled = true;
+            } else {
+                const error = await response.text();
+                throw new Error(error || 'Ошибка сервера');
+            }
+        } catch (error) {
+            showStatus(`❌ Ошибка: ${error.message}`, 'error');
+        } finally {
             analyzeBtn.disabled = files.length === 0;
-            if (files.length === 0) {
-                statusDiv.style.display = 'none';
-            }
-        };
-
-        function showStatus(text, type) {
-            statusDiv.className = type;
-            statusDiv.textContent = text;
-            statusDiv.style.display = 'block';
+            setTimeout(() => { if (statusDiv.className !== 'loading') { setTimeout(() => { statusDiv.style.display = 'none'; }, 4000); } }, 1000);
         }
-
-        function getSelectedFields() {
-            const checkboxes = document.querySelectorAll('.field-checkbox:checked');
-            const fields = [];
-            checkboxes.forEach(cb => fields.push(cb.value));
-            return fields;
-        }
-
-        analyzeBtn.addEventListener('click', async () => {
-            if (files.length === 0) return;
-
-            const selectedFields = getSelectedFields();
-            if (selectedFields.length === 0) {
-                showStatus('⚠️ Выберите хотя бы один пункт для анализа', 'error');
-                return;
-            }
-
-            statusDiv.className = 'loading';
-            statusDiv.innerHTML = `
-                <div class="spinner"></div>
-                <div>
-                    <div class="status-text">⏳ Анализируем ${files.length} файлов...</div>
-                    <div style="font-size:13px;color:#64748b;margin-top:4px">Выбрано полей: ${selectedFields.length}</div>
-                </div>
-            `;
-            statusDiv.style.display = 'flex';
-
-            const formData = new FormData();
-            files.forEach(f => formData.append('files', f));
-            formData.append('fields', JSON.stringify(selectedFields));
-
-            analyzeBtn.disabled = true;
-
-            try {
-                const response = await fetch('/analyze', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const link = document.createElement('a');
-                    link.href = URL.createObjectURL(blob);
-                    link.download = `результаты_анализа_${new Date().toISOString().slice(0,10)}.zip`;
-                    document.body.appendChild(link);
-                    link.click();
-                    link.remove();
-                    URL.revokeObjectURL(link.href);
-
-                    showStatus('✅ Анализ завершён! ZIP-архив скачан.', 'success');
-                    files = [];
-                    renderFileList();
-                    analyzeBtn.disabled = true;
-                } else {
-                    const error = await response.text();
-                    throw new Error(error || 'Ошибка сервера');
-                }
-            } catch (error) {
-                showStatus(`❌ Ошибка: ${error.message}`, 'error');
-            } finally {
-                analyzeBtn.disabled = files.length === 0;
-                setTimeout(() => {
-                    if (statusDiv.className !== 'loading') {
-                        setTimeout(() => { statusDiv.style.display = 'none'; }, 4000);
-                    }
-                }, 1000);
-            }
-        });
-    </script>
+    });
+</script>
 </body>
 </html>
