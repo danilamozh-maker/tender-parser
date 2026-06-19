@@ -470,12 +470,12 @@ async def analyze_from_browser(request: Request, data: dict):
             results.append({"url": url, "error": "Не удалось извлечь номер закупки"})
             continue
         
-        pdf_content = download_tender_pdf(reg_number)
+        pdf_content = download_tender_html(reg_number)
         if not pdf_content:
             results.append({"url": url, "error": "Не удалось скачать PDF"})
             continue
         
-        pdf_text = extract_text_from_pdf(pdf_content)
+        pdf_text = extract_text_from_html(pdf_content)
         if not pdf_text:
             results.append({"url": url, "error": "Не удалось извлечь текст из PDF"})
             continue
