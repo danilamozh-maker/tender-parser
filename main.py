@@ -445,7 +445,279 @@ async def analyze_files(
     finally:
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
+import re
+import requests
+import pdfplumber
+import io
 
+# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ РАСШИРЕНИЯ =================
+@app.post("/analyze_from_browser")
+async def analyze_from_browser(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    
+    tender_urls = data.get("tenderUrls", [])
+    if not tender_urls:
+        raise HTTPException(status_code=400, detail="Нет ссылок на тендеры")
+    
+    # Ограничим количество тендеров за один раз (например, 5)
+    tender_urls = tender_urls[:5]
+    
+    results = []
+    
+    for url in tender_urls:
+        # Извлекаем номер закупки из URL
+        reg_number = extract_reg_number(url)
+        if not reg_number:
+            results.append({
+                "url": url,
+                "error": "Не удалось извлечь номер закупки"
+            })
+            continue
+        
+        # Скачиваем PDF-форму
+        pdf_content = download_tender_pdf(reg_number)
+        if not pdf_content:
+            results.append({
+                "url": url,
+                "error": "Не удалось скачать PDF"
+            })
+            continue
+        
+        # Извлекаем текст из PDF
+        pdf_text = extract_text_from_pdf(pdf_content)
+        if not pdf_text:
+            results.append({
+                "url": url,
+                "error": "Не удалось извлечь текст из PDF"
+            })
+            continue
+        
+        # Отправляем текст в нейросеть для анализа
+        analysis_result = analyze_tender_text(pdf_text)
+        results.append({
+            "url": url,
+            "reg_number": reg_number,
+            "analysis": analysis_result
+        })
+    
+    return {
+        "status": "ok",
+        "count": len(results),
+        "results": results
+    }
+
+# ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
+
+def extract_reg_number(url: str) -> str:
+    """Извлекает номер закупки из URL."""
+    match = re.search(r'regNumber=([\d]+)', url)
+    if match:
+        return match.group(1)
+    match = re.search(r'purchaseNoticeNumber=([\d]+)', url)
+    if match:
+        return match.group(1)
+    return None
+
+def download_tender_pdf(reg_number: str):
+    """Скачивает PDF-форму по номеру закупки."""
+    url = f"https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber={reg_number}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.content
+        else:
+            print(f"Ошибка скачивания PDF: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"Ошибка при скачивании PDF: {e}")
+        return None
+
+def extract_text_from_pdf(pdf_content: bytes) -> str:
+    """Извлекает текст из PDF-файла."""
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+            text = ""
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+            return text
+    except Exception as e:
+        print(f"Ошибка при извлечении текста из PDF: {e}")
+        return None
+
+def analyze_tender_text(text: str) -> dict:
+    """Отправляет текст в нейросеть для анализа."""
+    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
+
+Ответ должен быть строго в таком формате (каждый пункт с новой строки):
+
+НАЗВАНИЕ АУКЦИОНА: 
+Начальная цена (НМЦ): 
+ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ: 
+ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ: 
+Аванс: 
+Обеспечение заявки: 
+Обеспечение контракта: 
+Обеспечение гарантийных обязательств: 
+Контакты: 
+Место исполнения: 
+ДАТА ОКОНЧАНИЯ КОНТРАКТА: 
+
+Вот текст для анализа:
+{text[:8000]}
+
+Извлеки данные и напиши в указанном формате."""
+    
+    answer = query_kodik(prompt)
+    
+    # Парсим ответ в словарь
+    result = {}
+    for line in answer.split('\n'):
+        if ':' in line:
+            key, value = line.split(':', 1)
+            result[key.strip()] = value.strip()
+    
+    return resultimport re
+import requests
+import pdfplumber
+import io
+
+# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ РАСШИРЕНИЯ =================
+@app.post("/analyze_from_browser")
+async def analyze_from_browser(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    
+    tender_urls = data.get("tenderUrls", [])
+    if not tender_urls:
+        raise HTTPException(status_code=400, detail="Нет ссылок на тендеры")
+    
+    # Ограничим количество тендеров за один раз (например, 5)
+    tender_urls = tender_urls[:5]
+    
+    results = []
+    
+    for url in tender_urls:
+        # Извлекаем номер закупки из URL
+        reg_number = extract_reg_number(url)
+        if not reg_number:
+            results.append({
+                "url": url,
+                "error": "Не удалось извлечь номер закупки"
+            })
+            continue
+        
+        # Скачиваем PDF-форму
+        pdf_content = download_tender_pdf(reg_number)
+        if not pdf_content:
+            results.append({
+                "url": url,
+                "error": "Не удалось скачать PDF"
+            })
+            continue
+        
+        # Извлекаем текст из PDF
+        pdf_text = extract_text_from_pdf(pdf_content)
+        if not pdf_text:
+            results.append({
+                "url": url,
+                "error": "Не удалось извлечь текст из PDF"
+            })
+            continue
+        
+        # Отправляем текст в нейросеть для анализа
+        analysis_result = analyze_tender_text(pdf_text)
+        results.append({
+            "url": url,
+            "reg_number": reg_number,
+            "analysis": analysis_result
+        })
+    
+    return {
+        "status": "ok",
+        "count": len(results),
+        "results": results
+    }
+
+# ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
+
+def extract_reg_number(url: str) -> str:
+    """Извлекает номер закупки из URL."""
+    match = re.search(r'regNumber=([\d]+)', url)
+    if match:
+        return match.group(1)
+    match = re.search(r'purchaseNoticeNumber=([\d]+)', url)
+    if match:
+        return match.group(1)
+    return None
+
+def download_tender_pdf(reg_number: str):
+    """Скачивает PDF-форму по номеру закупки."""
+    url = f"https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber={reg_number}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.content
+        else:
+            print(f"Ошибка скачивания PDF: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"Ошибка при скачивании PDF: {e}")
+        return None
+
+def extract_text_from_pdf(pdf_content: bytes) -> str:
+    """Извлекает текст из PDF-файла."""
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+            text = ""
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+            return text
+    except Exception as e:
+        print(f"Ошибка при извлечении текста из PDF: {e}")
+        return None
+
+def analyze_tender_text(text: str) -> dict:
+    """Отправляет текст в нейросеть для анализа."""
+    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
+
+Ответ должен быть строго в таком формате (каждый пункт с новой строки):
+
+НАЗВАНИЕ АУКЦИОНА: 
+Начальная цена (НМЦ): 
+ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ: 
+ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ: 
+Аванс: 
+Обеспечение заявки: 
+Обеспечение контракта: 
+Обеспечение гарантийных обязательств: 
+Контакты: 
+Место исполнения: 
+ДАТА ОКОНЧАНИЯ КОНТРАКТА: 
+
+Вот текст для анализа:
+{text[:8000]}
+
+Извлеки данные и напиши в указанном формате."""
+    
+    answer = query_kodik(prompt)
+    
+    # Парсим ответ в словарь
+    result = {}
+    for line in answer.split('\n'):
+        if ':' in line:
+            key, value = line.split(':', 1)
+            result[key.strip()] = value.strip()
+    
+    return result
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
