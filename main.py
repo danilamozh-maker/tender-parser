@@ -16,7 +16,7 @@ import openpyxl
 import xlrd
 import uvicorn
 import database
-import parser # <-- НОВЫЙ МОДУЛЬ ДЛЯ ПАРСИНГА
+import parser
 
 app = FastAPI()
 
@@ -266,7 +266,7 @@ def analyze_file(file_path, selected_fields):
         return answer
     return "\n".join(filtered_lines)
 
-# ================= НОВЫЙ ЭНДПОЙНТ: ПОИСК ТЕНДЕРОВ (ЧЕРЕЗ МОДУЛЬ PARSER) =================
+# ================= ПОИСК ТЕНДЕРОВ =================
 @app.post("/search_tenders")
 async def search_tenders(request: Request, data: dict):
     user = get_current_user(request)
@@ -278,7 +278,6 @@ async def search_tenders(request: Request, data: dict):
     if not query:
         raise HTTPException(status_code=400, detail="Введите ключевые слова для поиска")
     
-    # Ищем тендеры через модуль parser
     tender_urls = parser.search_tenders_zakupki(query, limit)
     if not tender_urls:
         return {"detail": "Тендеры по вашему запросу не найдены"}
@@ -291,10 +290,7 @@ async def search_tenders(request: Request, data: dict):
         tender_name = f"Тендер_{idx}"
         tender_dir = os.path.join(base_dir, tender_name)
         os.makedirs(tender_dir, exist_ok=True)
-        
-        # Скачиваем файлы через модуль parser
         files = parser.download_files_from_tender(tender_url, tender_dir)
-        
         if files:
             combined_text = ""
             for file_path in files:
@@ -307,9 +303,6 @@ async def search_tenders(request: Request, data: dict):
                 "text": combined_text[:5000]
             })
         time.sleep(2)
-    
-    if not results:
-        return {"detail": "Не удалось скачать файлы по найденным тендерам"}
     
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
@@ -335,7 +328,7 @@ async def search_tenders(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= НОВЫЙ ЭНДПОЙНТ: ПОДБОР КЛЮЧЕВЫХ СЛОВ =================
+# ================= ПОДБОР КЛЮЧЕВЫХ СЛОВ =================
 @app.post("/suggest_keywords")
 async def suggest_keywords(request: Request, data: dict):
     user = get_current_user(request)
@@ -356,6 +349,7 @@ async def suggest_keywords(request: Request, data: dict):
     answer = query_kodik(prompt)
     keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
     return {"keywords": keywords[:7]}
+
 # ================= ЭНДПОЙНТ ДЛЯ AI-ЧАТА =================
 @app.post("/ask_ai")
 async def ask_ai(request: Request, data: dict):
@@ -367,7 +361,6 @@ async def ask_ai(request: Request, data: dict):
     if not question:
         raise HTTPException(status_code=400, detail="Введите вопрос")
     
-    # Формируем промпт для ИИ (можно заменить под свою задачу)
     prompt = f"""Ты — консультант по тендерам и бизнес-процессам. Ответь на вопрос пользователя чётко, по делу, без воды.
 
 Вопрос пользователя: {question}
