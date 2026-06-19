@@ -447,6 +447,86 @@ async def analyze_files(
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
 
+# ================= ЭНДПОЙНТ ДЛЯ РАСШИРЕНИЯ (СТАРЫЙ — ПРИНИМАЕТ ССЫЛКИ) =================
+@app.post("/analyze_from_browser")
+async def analyze_from_browser(request: Request, data: dict):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    
+    tender_urls = data.get("tenderUrls", [])
+    if not tender_urls:
+        raise HTTPException(status_code=400, detail="Нет ссылок на тендеры")
+    
+    limit = data.get("limit", 5)
+    selected_fields = data.get("fields", [])
+    
+    tender_urls = tender_urls[:limit]
+    results = []
+    
+    for url in tender_urls:
+        reg_number = extract_reg_number(url)
+        if not reg_number:
+            results.append({"url": url, "error": "Не удалось извлечь номер закупки"})
+            continue
+        
+        html_content = download_tender_html(reg_number)
+        if not html_content:
+            results.append({"url": url, "error": "Не удалось скачать HTML"})
+            continue
+        
+        text = extract_text_from_html(html_content)
+        if not text:
+            results.append({"url": url, "error": "Не удалось извлечь текст из HTML"})
+            continue
+        
+        analysis_result = analyze_tender_text(text, selected_fields)
+        results.append({
+            "url": url,
+            "reg_number": reg_number,
+            "analysis": analysis_result
+        })
+    
+    # ===== ФОРМИРУЕМ WORD-ДОКУМЕНТ И ZIP-АРХИВ =====
+    doc = Document()
+    doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
+    doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+    doc.add_paragraph('=' * 50)
+    
+    for item in results:
+        doc.add_heading(f'Тендер: {item.get("reg_number", "Неизвестно")}', level=1)
+        doc.add_paragraph(f'Ссылка: {item.get("url", "Нет ссылки")}')
+        
+        if "error" in item:
+            doc.add_paragraph(f'❌ Ошибка: {item["error"]}')
+        else:
+            analysis = item.get("analysis", {})
+            for key, value in analysis.items():
+                doc.add_paragraph(f'{key}: {value}')
+        doc.add_page_break()
+    
+    word_buffer = io.BytesIO()
+    doc.save(word_buffer)
+    word_buffer.seek(0)
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+        zip_file.writestr(
+            f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx',
+            word_buffer.getvalue()
+        )
+    
+    zip_buffer.seek(0)
+    
+    filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+    encoded_filename = quote(filename)
+    
+    return Response(
+        zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+    )
+
 # ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ РАСШИРЕНИЯ (ПРИНИМАЕТ ГОТОВЫЙ ТЕКСТ) =================
 @app.post("/analyze_texts")
 async def analyze_texts(request: Request, data: dict):
@@ -534,6 +614,41 @@ async def analyze_texts(request: Request, data: dict):
     )
 
 # ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
+
+def extract_reg_number(url: str) -> str:
+    match = re.search(r'regNumber=([\d]+)', url)
+    if match:
+        return match.group(1)
+    match = re.search(r'purchaseNoticeNumber=([\d]+)', url)
+    if match:
+        return match.group(1)
+    return None
+
+def download_tender_html(reg_number: str):
+    url = f"https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber={reg_number}"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.text
+        else:
+            print(f"Ошибка скачивания HTML: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"Ошибка при скачивании HTML: {e}")
+        return None
+
+def extract_text_from_html(html_content: str) -> str:
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        for script in soup(["script", "style"]):
+            script.decompose()
+        text = soup.get_text(separator="\n")
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"Ошибка при извлечении текста из HTML: {e}")
+        return None
 
 def analyze_tender_text(text: str, selected_fields: list) -> dict:
     if not selected_fields:
