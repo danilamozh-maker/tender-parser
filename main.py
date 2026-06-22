@@ -504,8 +504,7 @@ async def analyze_texts(request: Request, data: dict):
     
     for item in results:
         doc.add_heading(f'Тендер: {item.get("reg_number", "Неизвестно")}', level=1)
-        doc.add_paragraph(f'Ссылка: {item.get("url", "Нет ссылки")}')
-        
+        # Строка со ссылкой УДАЛЕНА
         if "error" in item:
             doc.add_paragraph(f'❌ Ошибка: {item["error"]}')
         else:
