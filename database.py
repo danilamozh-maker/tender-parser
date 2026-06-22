@@ -36,6 +36,38 @@ def init_db():
     conn.close()
     print("✅ База данных инициализирована")
 
+# ================= ФУНКЦИИ ДЛЯ ПОЛЬЗОВАТЕЛЕЙ =================
+
+def create_user(email: str, password: str):
+    password = password[:72]
+    conn = get_db()
+    hashed = sha256_crypt.hash(password)
+    try:
+        conn.execute(
+            "INSERT INTO users (email, hashed_password) VALUES (?, ?)",
+            (email, hashed)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False
+
+def get_user(email: str):
+    conn = get_db()
+    user = conn.execute(
+        "SELECT * FROM users WHERE email = ?", (email,)
+    ).fetchone()
+    conn.close()
+    return user
+
+def verify_password(plain_password: str, hashed_password: str):
+    plain_password = plain_password[:72]
+    return sha256_crypt.verify(plain_password, hashed_password)
+
+# ================= ФУНКЦИИ ДЛЯ ЛИЦЕНЗИЙ =================
+
 def generate_license_key():
     alphabet = string.ascii_uppercase + string.digits
     key = '-'.join(''.join(secrets.choice(alphabet) for _ in range(4)) for _ in range(4))
