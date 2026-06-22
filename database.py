@@ -6,8 +6,6 @@ from passlib.hash import sha256_crypt
 
 DB_PATH = "database.db"
 
-# ================= ОБЩИЕ ФУНКЦИИ =================
-
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -15,8 +13,6 @@ def get_db():
 
 def init_db():
     conn = get_db()
-    
-    # === Таблица пользователей (была) ===
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,8 +21,6 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    
-    # === Таблица лицензий (новая) ===
     conn.execute("""
         CREATE TABLE IF NOT EXISTS licenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,42 +32,9 @@ def init_db():
             activated_at TIMESTAMP
         )
     """)
-    
     conn.commit()
     conn.close()
-    print("✅ База данных инициализирована (пользователи + лицензии)")
-
-# ================= ФУНКЦИИ ДЛЯ ПОЛЬЗОВАТЕЛЕЙ (были) =================
-
-def create_user(email: str, password: str):
-    password = password[:72]
-    conn = get_db()
-    hashed = sha256_crypt.hash(password)
-    try:
-        conn.execute(
-            "INSERT INTO users (email, hashed_password) VALUES (?, ?)",
-            (email, hashed)
-        )
-        conn.commit()
-        conn.close()
-        return True
-    except sqlite3.IntegrityError:
-        conn.close()
-        return False
-
-def get_user(email: str):
-    conn = get_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE email = ?", (email,)
-    ).fetchone()
-    conn.close()
-    return user
-
-def verify_password(plain_password: str, hashed_password: str):
-    plain_password = plain_password[:72]
-    return sha256_crypt.verify(plain_password, hashed_password)
-
-# ================= ФУНКЦИИ ДЛЯ ЛИЦЕНЗИЙ (новые) =================
+    print("✅ База данных инициализирована")
 
 def generate_license_key():
     alphabet = string.ascii_uppercase + string.digits
@@ -119,6 +80,7 @@ def verify_and_activate_license(key):
     return {"valid": True, "expires_at": license["expires_at"]}
 
 def verify_license(key):
+    """Проверяет только срок действия, не трогает is_active"""
     conn = get_db()
     license = conn.execute(
         "SELECT * FROM licenses WHERE license_key = ?", (key,)
@@ -126,8 +88,6 @@ def verify_license(key):
     conn.close()
     if not license:
         return None
-    if not license["is_active"]:
-        return {"valid": False, "reason": "inactive"}
     if datetime.now() > datetime.fromisoformat(license["expires_at"]):
         return {"valid": False, "reason": "expired"}
     return {"valid": True, "expires_at": license["expires_at"], "email": license["user_email"]}
