@@ -1,7 +1,9 @@
 import sqlite3
-from passlib.hash import sha256_crypt
+from datetime import datetime, timedelta
+import secrets
+import string
 
-DB_PATH = "users.db"
+DB_PATH = "database.db"
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -10,6 +12,7 @@ def get_db():
 
 def init_db():
     conn = get_db()
+    # Таблица пользователей (если нужна)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,43 +21,82 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Таблица лицензий
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS licenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            license_key TEXT UNIQUE NOT NULL,
+            user_email TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL,
+            is_active BOOLEAN DEFAULT 1,
+            activated_at TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
     print("✅ База данных инициализирована")
 
-def create_user(email: str, password: str):
-    # Обрезаем пароль до 72 символов (для безопасности)
-    password = password[:72]
-    
+def generate_license_key():
+    alphabet = string.ascii_uppercase + string.digits
+    key = '-'.join(''.join(secrets.choice(alphabet) for _ in range(4)) for _ in range(4))
+    return key
+
+def create_license(email=None, days_valid=30):
     conn = get_db()
-    hashed = sha256_crypt.hash(password)
+    license_key = generate_license_key()
+    expires_at = datetime.now() + timedelta(days=days_valid)
     try:
         conn.execute(
-            "INSERT INTO users (email, hashed_password) VALUES (?, ?)",
-            (email, hashed)
+            "INSERT INTO licenses (license_key, user_email, expires_at, is_active) VALUES (?, ?, ?, ?)",
+            (license_key, email, expires_at, 1)
         )
         conn.commit()
         conn.close()
-        print(f"✅ Пользователь {email} создан")
-        return True
+        return license_key
     except sqlite3.IntegrityError:
         conn.close()
-        print(f"❌ Пользователь {email} уже существует")
-        return False
-    except Exception as e:
-        conn.close()
-        print(f"❌ Ошибка при создании пользователя: {e}")
-        return False
+        return None
 
-def get_user(email: str):
+def verify_and_activate_license(key):
     conn = get_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE email = ?", (email,)
+    license = conn.execute(
+        "SELECT * FROM licenses WHERE license_key = ?", (key,)
+    ).fetchone()
+    if not license:
+        conn.close()
+        return {"valid": False, "reason": "not_found"}
+    if not license["is_active"]:
+        conn.close()
+        return {"valid": False, "reason": "already_used"}
+    if datetime.now() > datetime.fromisoformat(license["expires_at"]):
+        conn.close()
+        return {"valid": False, "reason": "expired"}
+    # Активируем
+    conn.execute(
+        "UPDATE licenses SET is_active = 0, activated_at = ? WHERE license_key = ?",
+        (datetime.now(), key)
+    )
+    conn.commit()
+    conn.close()
+    return {"valid": True, "expires_at": license["expires_at"]}
+
+def verify_license(key):
+    conn = get_db()
+    license = conn.execute(
+        "SELECT * FROM licenses WHERE license_key = ?", (key,)
     ).fetchone()
     conn.close()
-    return user
+    if not license:
+        return None
+    if not license["is_active"]:
+        return {"valid": False, "reason": "inactive"}
+    if datetime.now() > datetime.fromisoformat(license["expires_at"]):
+        return {"valid": False, "reason": "expired"}
+    return {"valid": True, "expires_at": license["expires_at"], "email": license["user_email"]}
 
-def verify_password(plain_password: str, hashed_password: str):
-    # Обрезаем пароль до 72 символов при проверке
-    plain_password = plain_password[:72]
-    return sha256_crypt.verify(plain_password, hashed_password)
+def deactivate_license(key):
+    conn = get_db()
+    conn.execute("UPDATE licenses SET is_active = 0 WHERE license_key = ?", (key,))
+    conn.commit()
+    conn.close()
