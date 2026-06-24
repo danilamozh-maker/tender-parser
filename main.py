@@ -231,7 +231,10 @@ def read_excel(file_path):
             return f"Ошибка чтения Excel: {e}"
 
 @app.post("/package_files")
-async def package_files(files: list[UploadFile] = File(...)):
+async def package_files(
+    request: Request, # ← добавляем request
+    files: list[UploadFile] = File(...)
+):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизован")
@@ -249,6 +252,12 @@ async def package_files(files: list[UploadFile] = File(...)):
                 tenders[tender_id] = []
             content = await file.read()
             tenders[tender_id].append((original_name, content))
+        else:
+            # Если нет префикса — в отдельную папку
+            if "без_тендера" not in tenders:
+                tenders["без_тендера"] = []
+            content = await file.read()
+            tenders["без_тендера"].append((file.filename, content))
     
     # Создаём ZIP-архив с папками
     zip_buffer = io.BytesIO()
@@ -268,6 +277,7 @@ async def package_files(files: list[UploadFile] = File(...)):
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
+
 
 # ================= ЗАПРОС К DEEPSEEK (синхронный) =================
 def query_deepseek(prompt):
