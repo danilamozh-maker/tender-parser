@@ -22,17 +22,15 @@ from bs4 import BeautifulSoup
 
 app = FastAPI()
 
-# Инициализация базы данных
 database.init_db()
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
-API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # ← ВСТАВЬ СВОЙ КЛЮЧ!
+API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56"
 MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 # ============================================
 
-# ================= АВТОРИЗАЦИЯ =================
 def get_current_user(request: Request):
     email = request.cookies.get("user_email")
     if not email:
@@ -186,7 +184,6 @@ def read_excel(file_path):
         except Exception as e:
             return f"Ошибка чтения Excel: {e}"
 
-# ================= ЗАПРОС К DEEPSEEK =================
 def query_deepseek(prompt):
     messages = [
         {"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
@@ -213,7 +210,6 @@ def query_deepseek(prompt):
     except Exception as e:
         return f"❌ Ошибка: {e}"
 
-# ================= АНАЛИЗ ФАЙЛА =================
 def analyze_file(file_path, selected_fields):
     ext = Path(file_path).suffix.lower()
     if ext == ".docx":
@@ -266,25 +262,20 @@ def analyze_file(file_path, selected_fields):
         return answer
     return "\n".join(filtered_lines)
 
-# ================= ПОИСК ТЕНДЕРОВ =================
 @app.post("/search_tenders")
 async def search_tenders(request: Request, data: dict):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизован")
-    
     query = data.get("query", "").strip()
     limit = data.get("limit", MAX_TENDERS)
     if not query:
-        raise HTTPException(status_code=400, detail="Введите ключевые слова для поиска")
-    
+        raise HTTPException(400, "Введите ключевые слова для поиска")
     tender_urls = parser.search_tenders_zakupki(query, limit)
     if not tender_urls:
         return {"detail": "Тендеры по вашему запросу не найдены"}
-    
     base_dir = f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(base_dir, exist_ok=True)
-    
     results = []
     for idx, tender_url in enumerate(tender_urls[:MAX_TENDERS], 1):
         tender_name = f"Тендер_{idx}"
@@ -303,7 +294,6 @@ async def search_tenders(request: Request, data: dict):
                 "text": combined_text[:5000]
             })
         time.sleep(2)
-    
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
         for res in results:
@@ -316,7 +306,6 @@ async def search_tenders(request: Request, data: dict):
             doc.save(word_buffer)
             word_buffer.seek(0)
             zip_file.writestr(f"{res['tender_name']}_результат.docx", word_buffer.getvalue())
-    
     zip_buffer.seek(0)
     filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded_filename = quote(filename)
@@ -328,49 +317,40 @@ async def search_tenders(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= ПОДБОР КЛЮЧЕВЫХ СЛОВ =================
 @app.post("/suggest_keywords")
 async def suggest_keywords(request: Request, data: dict):
     user = get_current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Не авторизован")
-    
+        raise HTTPException(401, detail="Не авторизован")
     description = data.get("description", "").strip()
     if not description:
-        raise HTTPException(status_code=400, detail="Описание не может быть пустым")
-    
+        raise HTTPException(400, "Описание не может быть пустым")
     prompt = f"""Ты — помощник по тендерам. Пользователь описал свою деятельность:
 "{description}"
 
 Выдели 5–7 ключевых слов для поиска тендеров на zakupki.gov.ru.
 Ключевые слова должны быть конкретными (например, "строительство школы", "поставка медоборудования", "ремонт дорог").
 Выдай ТОЛЬКО список слов через запятую, без лишнего текста."""
-    
     answer = query_deepseek(prompt)
     keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
     return {"keywords": keywords[:7]}
 
-# ================= ЭНДПОЙНТ ДЛЯ AI-ЧАТА =================
 @app.post("/ask_ai")
 async def ask_ai(request: Request, data: dict):
     user = get_current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Не авторизован")
-    
+        raise HTTPException(401, detail="Не авторизован")
     question = data.get("question", "").strip()
     if not question:
-        raise HTTPException(status_code=400, detail="Введите вопрос")
-    
+        raise HTTPException(400, "Введите вопрос")
     prompt = f"""Ты — консультант по тендерам и бизнес-процессам. Ответь на вопрос пользователя чётко, по делу, без воды.
 
 Вопрос пользователя: {question}
 
 Дай ответ в виде текста (2-4 предложения), который будет полезен для бизнеса."""
-    
     answer = query_deepseek(prompt)
     return {"answer": answer}
 
-# ================= ГЛАВНАЯ СТРАНИЦА =================
 @app.get("/", response_class=HTMLResponse)
 async def main(request: Request):
     user = get_current_user(request)
@@ -380,7 +360,6 @@ async def main(request: Request):
         html_content = f.read()
     return HTMLResponse(content=html_content)
 
-# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ФАЙЛОВ =================
 @app.post("/analyze")
 async def analyze_files(
     request: Request,
@@ -389,7 +368,7 @@ async def analyze_files(
 ):
     user = get_current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Не авторизован")
+        raise HTTPException(401, detail="Не авторизован")
     if not files:
         raise HTTPException(400, "Нет файлов")
     try:
@@ -446,18 +425,15 @@ async def analyze_files(
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
 
-# ================= ЭНДПОЙНТ ДЛЯ РАСШИРЕНИЯ (ПРИНИМАЕТ ГОТОВЫЙ ТЕКСТ) =================
 @app.post("/analyze_texts")
 async def analyze_texts(request: Request, data: dict):
     start_total = time.time()
     user = get_current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Не авторизован")
-    
+        raise HTTPException(401, detail="Не авторизован")
     tenders_data = data.get("tenders", [])
     if not tenders_data:
-        raise HTTPException(status_code=400, detail="Нет данных для анализа")
-    
+        raise HTTPException(400, "Нет данных для анализа")
     selected_fields = data.get("fields", [])
     if not selected_fields:
         selected_fields = [
@@ -473,7 +449,6 @@ async def analyze_texts(request: Request, data: dict):
             "Место исполнения",
             "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
-    
     async def analyze_one(tender):
         tender_text = tender.get("text", "")
         if not tender_text or len(tender_text) < 100:
@@ -490,15 +465,12 @@ async def analyze_texts(request: Request, data: dict):
             "reg_number": tender.get("regNumber", ""),
             "analysis": analysis_result
         }
-    
     tasks = [analyze_one(t) for t in tenders_data]
     results = await asyncio.gather(*tasks)
-    
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
     doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
     doc.add_paragraph('=' * 50)
-    
     for item in results:
         doc.add_heading(f'Тендер: {item.get("reg_number", "Неизвестно")}', level=1)
         if "error" in item:
@@ -508,18 +480,15 @@ async def analyze_texts(request: Request, data: dict):
             for key, value in analysis.items():
                 doc.add_paragraph(f'{key}: {value}')
         doc.add_page_break()
-    
     word_buffer = io.BytesIO()
     doc.save(word_buffer)
     word_buffer.seek(0)
-    
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
         zip_file.writestr(
             f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx',
             word_buffer.getvalue()
         )
-    
     zip_buffer.seek(0)
     filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     encoded_filename = quote(filename)
@@ -530,7 +499,7 @@ async def analyze_texts(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (без дублей) =================
+# ================= ФИНАЛЬНЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (с принудительным .docx) =================
 @app.post("/package_files")
 async def package_files(
     request: Request,
@@ -544,6 +513,9 @@ async def package_files(
     if not files:
         raise HTTPException(400, "Нет файлов")
     
+    # Разрешённые расширения (оставляем как есть)
+    ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.xlsx', '.xls', '.txt'}
+    
     tenders = {}
     for file in files:
         content = await file.read()
@@ -553,10 +525,14 @@ async def package_files(
         else:
             tender_id, original_name = "без_тендера", file.filename
         
-        # Если расширения нет — добавляем .docx
-        if '.' not in original_name:
-            original_name = original_name + '.docx'
-            print(f"🔍 Добавлено расширение .docx для: {original_name}")
+        # Принудительно заменяем расширение, если оно не в белом списке
+        base, ext = os.path.splitext(original_name)
+        ext_lower = ext.lower()
+        if not ext_lower or ext_lower not in ALLOWED_EXTENSIONS:
+            original_name = base + '.docx'
+            print(f"🔍 Расширение заменено на .docx для: {original_name}")
+        else:
+            original_name = base + ext_lower
         
         if tender_id not in tenders:
             tenders[tender_id] = []
@@ -652,7 +628,6 @@ async def verify_license(data: dict):
     return {"valid": True, "expires_at": result["expires_at"]}
 
 # ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
-
 def analyze_tender_text(text: str, selected_fields: list) -> dict:
     if not selected_fields:
         selected_fields = [
@@ -668,9 +643,7 @@ def analyze_tender_text(text: str, selected_fields: list) -> dict:
             "Место исполнения",
             "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
-    
     fields_str = "\n".join([f"{field}: " for field in selected_fields])
-    
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
@@ -681,7 +654,6 @@ def analyze_tender_text(text: str, selected_fields: list) -> dict:
 {text[:8000]}
 
 Извлеки данные и напиши в указанном формате."""
-    
     answer = query_deepseek(prompt)
     result = {}
     for line in answer.split('\n'):
