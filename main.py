@@ -569,20 +569,23 @@ async def package_files(
     if not files:
         raise HTTPException(400, "Нет файлов")
     
-    # Группируем файлы по тендерам и определяем расширение
+    # Группируем файлы по тендерам и принудительно добавляем расширение
     tenders = {}
     for file in files:
         content = await file.read()
-        ext = detect_extension(content)
         parts = file.filename.split('_', 1)
         if len(parts) == 2:
             tender_id, original_name = parts[0], parts[1]
         else:
             tender_id, original_name = "без_тендера", file.filename
         
-        # Если у файла нет расширения — добавляем
+        # ===== ЖЁСТКОЕ ДОБАВЛЕНИЕ .docx ЕСЛИ РАСШИРЕНИЯ НЕТ =====
         if '.' not in original_name:
-            original_name = original_name + ext
+            original_name = original_name + '.docx'
+            print(f"🔍 Добавлено расширение .docx для: {original_name}")
+        else:
+            # Если расширение есть, но файл не открывается — оставляем как есть
+            pass
         
         if tender_id not in tenders:
             tenders[tender_id] = []
@@ -619,6 +622,7 @@ async def package_files(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
+
 
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
 @app.get("/buy")
