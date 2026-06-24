@@ -138,50 +138,6 @@ async def logout():
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie("user_email")
     return response
-# ================= ЛИЦЕНЗИИ =================
-
-@app.get("/buy")
-async def buy_page():
-    with open("templates/buy.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
-
-@app.post("/api/create-order")
-async def create_order():
-    # Пока симуляция оплаты. В будущем — интеграция с Robokassa.
-    license_key = database.create_license(days_valid=30)
-    if not license_key:
-        raise HTTPException(500, "Не удалось создать лицензию")
-    conn = database.get_db()
-    lic = conn.execute("SELECT expires_at FROM licenses WHERE license_key = ?", (license_key,)).fetchone()
-    conn.close()
-    return {
-        "status": "success",
-        "license_key": license_key,
-        "expires_at": lic["expires_at"] if lic else None
-    }
-
-@app.post("/api/activate-license")
-async def activate_license(data: dict):
-    key = data.get("key")
-    if not key:
-        raise HTTPException(400, "Ключ не указан")
-    result = database.verify_and_activate_license(key)
-    if not result["valid"]:
-        return {"valid": False, "reason": result["reason"]}
-    return {"valid": True, "expires_at": result["expires_at"]}
-
-@app.post("/api/verify-license")
-async def verify_license(data: dict):
-    key = data.get("key")
-    if not key:
-        raise HTTPException(400, "Ключ не указан")
-    result = database.verify_license(key)
-    if result is None:
-        return {"valid": False, "reason": "not_found"}
-    if not result["valid"]:
-        return {"valid": False, "reason": result["reason"]}
-    return {"valid": True, "expires_at": result["expires_at"]}
-
 
 # ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
 def read_docx(file_path):
@@ -230,54 +186,7 @@ def read_excel(file_path):
         except Exception as e:
             return f"Ошибка чтения Excel: {e}"
 
-@app.post("/package_files")
-async def package_files(
-    request: Request,
-    files: list[UploadFile] = File(...),
-    analysis_text: str = Form("") # ← добавляем текстовый файл с анализом
-):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Не авторизован")
-    
-    # Группируем файлы по тендерам
-    tenders = {}
-    for file in files:
-        parts = file.filename.split('_', 1)
-        if len(parts) == 2:
-            tender_id, original_name = parts[0], parts[1]
-            if tender_id not in tenders:
-                tenders[tender_id] = []
-            content = await file.read()
-            tenders[tender_id].append((original_name, content))
-    
-    # Создаём ZIP-архив
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
-        # Добавляем файлы по папкам
-        for tender_id, file_list in tenders.items():
-            folder_name = f"Тендер_{tender_id}"
-            for original_name, content in file_list:
-                file_path = os.path.join(folder_name, original_name)
-                zip_file.writestr(file_path, content)
-        
-        # Добавляем анализ, если он передан
-        if analysis_text:
-            # Сохраняем анализ как текстовый файл в корень архива
-            zip_file.writestr("анализ_тендеров.txt", analysis_text)
-    
-    zip_buffer.seek(0)
-    filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-    encoded_filename = quote(filename)
-    
-    return Response(
-        zip_buffer.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
-    )
-
-
-# ================= ЗАПРОС К DEEPSEEK (синхронный) =================
+# ================= ЗАПРОС К DEEPSEEK =================
 def query_deepseek(prompt):
     messages = [
         {"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
@@ -565,7 +474,6 @@ async def analyze_texts(request: Request, data: dict):
             "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
     
-    # ===== ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА =====
     async def analyze_one(tender):
         tender_text = tender.get("text", "")
         if not tender_text or len(tender_text) < 100:
@@ -583,11 +491,9 @@ async def analyze_texts(request: Request, data: dict):
             "analysis": analysis_result
         }
     
-    # Запускаем все задачи параллельно
     tasks = [analyze_one(t) for t in tenders_data]
     results = await asyncio.gather(*tasks)
     
-    # ===== ФОРМИРУЕМ WORD-ДОКУМЕНТ И ZIP-АРХИВ =====
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
     doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
@@ -595,7 +501,6 @@ async def analyze_texts(request: Request, data: dict):
     
     for item in results:
         doc.add_heading(f'Тендер: {item.get("reg_number", "Неизвестно")}', level=1)
-        # Строка со ссылкой УДАЛЕНА
         if "error" in item:
             doc.add_paragraph(f'❌ Ошибка: {item["error"]}')
         else:
@@ -616,11 +521,75 @@ async def analyze_texts(request: Request, data: dict):
         )
     
     zip_buffer.seek(0)
-    
     filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     encoded_filename = quote(filename)
-    
     print(f"⏱️ Общее время обработки: {time.time() - start_total:.2f} сек")
+    return Response(
+        zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+    )
+
+# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ =================
+@app.post("/package_files")
+async def package_files(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    analysis_text: str = Form("")
+):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    
+    if not files:
+        raise HTTPException(400, "Нет файлов")
+    
+    # Группируем файлы по тендерам
+    tenders = {}
+    for file in files:
+        parts = file.filename.split('_', 1)
+        if len(parts) == 2:
+            tender_id, original_name = parts[0], parts[1]
+            if tender_id not in tenders:
+                tenders[tender_id] = []
+            content = await file.read()
+            tenders[tender_id].append((original_name, content))
+        else:
+            if "без_тендера" not in tenders:
+                tenders["без_тендера"] = []
+            content = await file.read()
+            tenders["без_тендера"].append((file.filename, content))
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+        # Добавляем файлы по папкам
+        for tender_id, file_list in tenders.items():
+            folder_name = f"Тендер_{tender_id}"
+            for original_name, content in file_list:
+                file_path = os.path.join(folder_name, original_name)
+                zip_file.writestr(file_path, content)
+        
+        # Если есть анализ, создаём Word-документ
+        if analysis_text:
+            doc = Document()
+            doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
+            doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+            doc.add_paragraph('=' * 50)
+            
+            # Парсим анализ по тендерам (разделитель === Тендер ... ===)
+            sections = analysis_text.split('=== Тендер')
+            for section in sections:
+                if section.strip():
+                    doc.add_paragraph(section.strip())
+            
+            word_buffer = io.BytesIO()
+            doc.save(word_buffer)
+            word_buffer.seek(0)
+            zip_file.writestr("анализ_тендеров.docx", word_buffer.getvalue())
+    
+    zip_buffer.seek(0)
+    filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    encoded_filename = quote(filename)
     
     return Response(
         zip_buffer.getvalue(),
@@ -647,7 +616,6 @@ def analyze_tender_text(text: str, selected_fields: list) -> dict:
         ]
     
     fields_str = "\n".join([f"{field}: " for field in selected_fields])
-    
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
