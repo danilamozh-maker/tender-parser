@@ -530,13 +530,12 @@ async def analyze_texts(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ РАСШИРЕНИЯ =================
+# ================= ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ РАСШИРЕНИЯ (запасная) =================
 def detect_extension(content: bytes) -> str:
     """Определяет расширение файла по первым байтам (сигнатуре)."""
     if content.startswith(b'%PDF'):
         return '.pdf'
     if len(content) > 4 and content[0:4] == b'PK\x03\x04':
-        # DOCX или XLSX (ZIP-архивы)
         if b'[Content_Types].xml' in content[:1000]:
             if b'word/' in content[:1000]:
                 return '.docx'
@@ -548,14 +547,12 @@ def detect_extension(content: bytes) -> str:
     if content[:100].strip().lower().startswith(b'<!DOCTYPE html') or content[:50].strip().lower().startswith(b'<html'):
         return '.html'
     if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
-        # DOC или XLS (старый бинарный формат)
         return '.doc'
     if content.startswith(b'{\\rtf'):
         return '.rtf'
-    # Если ничего не подошло — .bin
     return '.bin'
 
-# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (с определением расширения) =================
+# ================= ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (добавляет .docx если нет расширения) =================
 @app.post("/package_files")
 async def package_files(
     request: Request,
@@ -569,7 +566,6 @@ async def package_files(
     if not files:
         raise HTTPException(400, "Нет файлов")
     
-    # Группируем файлы по тендерам и принудительно добавляем расширение
     tenders = {}
     for file in files:
         content = await file.read()
@@ -579,13 +575,11 @@ async def package_files(
         else:
             tender_id, original_name = "без_тендера", file.filename
         
-        # ===== ЖЁСТКОЕ ДОБАВЛЕНИЕ .docx ЕСЛИ РАСШИРЕНИЯ НЕТ =====
+        # ===== ЕСЛИ РАСШИРЕНИЯ НЕТ — ДОБАВЛЯЕМ .docx =====
         if '.' not in original_name:
             original_name = original_name + '.docx'
             print(f"🔍 Добавлено расширение .docx для: {original_name}")
-        else:
-            # Если расширение есть, но файл не открывается — оставляем как есть
-            pass
+        # =============================================
         
         if tender_id not in tenders:
             tenders[tender_id] = []
@@ -622,7 +616,6 @@ async def package_files(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
-
 
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
 @app.get("/buy")
