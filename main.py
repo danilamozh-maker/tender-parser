@@ -232,17 +232,15 @@ def read_excel(file_path):
 
 @app.post("/package_files")
 async def package_files(
-    request: Request, # ← добавляем request
-    files: list[UploadFile] = File(...)
+    request: Request,
+    files: list[UploadFile] = File(...),
+    analysis_text: str = Form("") # ← добавляем текстовый файл с анализом
 ):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизован")
     
-    if not files:
-        raise HTTPException(400, "Нет файлов")
-    
-    # Группируем файлы по префиксам (номерам тендеров)
+    # Группируем файлы по тендерам
     tenders = {}
     for file in files:
         parts = file.filename.split('_', 1)
@@ -252,24 +250,24 @@ async def package_files(
                 tenders[tender_id] = []
             content = await file.read()
             tenders[tender_id].append((original_name, content))
-        else:
-            # Если нет префикса — в отдельную папку
-            if "без_тендера" not in tenders:
-                tenders["без_тендера"] = []
-            content = await file.read()
-            tenders["без_тендера"].append((file.filename, content))
     
-    # Создаём ZIP-архив с папками
+    # Создаём ZIP-архив
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+        # Добавляем файлы по папкам
         for tender_id, file_list in tenders.items():
             folder_name = f"Тендер_{tender_id}"
             for original_name, content in file_list:
                 file_path = os.path.join(folder_name, original_name)
                 zip_file.writestr(file_path, content)
+        
+        # Добавляем анализ, если он передан
+        if analysis_text:
+            # Сохраняем анализ как текстовый файл в корень архива
+            zip_file.writestr("анализ_тендеров.txt", analysis_text)
     
     zip_buffer.seek(0)
-    filename = f"документы_тендеров_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded_filename = quote(filename)
     
     return Response(
