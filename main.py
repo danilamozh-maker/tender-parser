@@ -230,6 +230,45 @@ def read_excel(file_path):
         except Exception as e:
             return f"Ошибка чтения Excel: {e}"
 
+@app.post("/package_files")
+async def package_files(files: list[UploadFile] = File(...)):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    
+    if not files:
+        raise HTTPException(400, "Нет файлов")
+    
+    # Группируем файлы по префиксам (номерам тендеров)
+    tenders = {}
+    for file in files:
+        parts = file.filename.split('_', 1)
+        if len(parts) == 2:
+            tender_id, original_name = parts[0], parts[1]
+            if tender_id not in tenders:
+                tenders[tender_id] = []
+            content = await file.read()
+            tenders[tender_id].append((original_name, content))
+    
+    # Создаём ZIP-архив с папками
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+        for tender_id, file_list in tenders.items():
+            folder_name = f"Тендер_{tender_id}"
+            for original_name, content in file_list:
+                file_path = os.path.join(folder_name, original_name)
+                zip_file.writestr(file_path, content)
+    
+    zip_buffer.seek(0)
+    filename = f"документы_тендеров_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    encoded_filename = quote(filename)
+    
+    return Response(
+        zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+    )
+
 # ================= ЗАПРОС К DEEPSEEK (синхронный) =================
 def query_deepseek(prompt):
     messages = [
