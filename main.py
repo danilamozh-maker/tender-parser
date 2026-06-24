@@ -40,7 +40,7 @@ def get_current_user(request: Request):
     user = database.get_user(email)
     return user
 
-# ================= СТРАНИЦЫ АВТОРИЗАЦИИ (без изменений) =================
+# ================= СТРАНИЦЫ АВТОРИЗАЦИИ =================
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     error = request.query_params.get("error", "")
@@ -480,7 +480,7 @@ async def analyze_texts(request: Request, data: dict):
             return {
                 "url": tender.get("url", ""),
                 "reg_number": tender.get("regNumber", ""),
-                "error": "Недостаточно текста dla анализа"
+                "error": "Недостаточно текста для анализа"
             }
         start = time.time()
         analysis_result = analyze_tender_text(tender_text, selected_fields)
@@ -530,7 +530,32 @@ async def analyze_texts(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (без анализа) =================
+# ================= ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ РАСШИРЕНИЯ =================
+def detect_extension(content: bytes) -> str:
+    """Определяет расширение файла по первым байтам (сигнатуре)."""
+    if content.startswith(b'%PDF'):
+        return '.pdf'
+    if len(content) > 4 and content[0:4] == b'PK\x03\x04':
+        # DOCX или XLSX (ZIP-архивы)
+        if b'[Content_Types].xml' in content[:1000]:
+            if b'word/' in content[:1000]:
+                return '.docx'
+            if b'xl/' in content[:1000]:
+                return '.xlsx'
+        if b'META-INF' in content[:1000]:
+            return '.docx'
+        return '.zip'
+    if content[:100].strip().lower().startswith(b'<!DOCTYPE html') or content[:50].strip().lower().startswith(b'<html'):
+        return '.html'
+    if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
+        # DOC или XLS (старый бинарный формат)
+        return '.doc'
+    if content.startswith(b'{\\rtf'):
+        return '.rtf'
+    # Если ничего не подошло — .bin
+    return '.bin'
+
+# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (с определением расширения) =================
 @app.post("/package_files")
 async def package_files(
     request: Request,
@@ -547,17 +572,15 @@ async def package_files(
     # Группируем файлы по тендерам и определяем расширение
     tenders = {}
     for file in files:
-        # Определяем расширение по содержимому
         content = await file.read()
         ext = detect_extension(content)
-        # Извлекаем номер тендера из имени файла
         parts = file.filename.split('_', 1)
         if len(parts) == 2:
             tender_id, original_name = parts[0], parts[1]
         else:
             tender_id, original_name = "без_тендера", file.filename
         
-        # Добавляем расширение, если его нет
+        # Если у файла нет расширения — добавляем
         if '.' not in original_name:
             original_name = original_name + ext
         
@@ -596,45 +619,6 @@ async def package_files(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
-
-
-def detect_extension(content: bytes) -> str:
-    """Определяет расширение файла по первым байтам."""
-    # PDF
-    if content.startswith(b'%PDF'):
-        return '.pdf'
-    # DOCX / XLSX / ZIP
-    if len(content) > 4 and content[0:4] == b'PK\x03\x04':
-        # Пытаемся определить по содержимому внутри ZIP
-        # Если внутри есть [Content_Types].xml — это DOCX или XLSX
-        if b'[Content_Types].xml' in content[:1000]:
-            if b'word/' in content[:1000]:
-                return '.docx'
-            if b'xl/' in content[:1000]:
-                return '.xlsx'
-        # Если внутри есть META-INF — это DOCX
-        if b'META-INF' in content[:1000]:
-            return '.docx'
-        # По умолчанию считаем ZIP
-        return '.zip'
-    # HTML
-    if content[:100].strip().lower().startswith(b'<!DOCTYPE html') or content[:50].strip().lower().startswith(b'<html'):
-        return '.html'
-    # TXT
-    if content[:50].strip().replace(b'\n', b'').replace(b'\r', b'').replace(b' ', b'').isalnum() or b' ' in content[:50]:
-        return '.txt'
-    # DOC (старый бинарный формат)
-    if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
-        return '.doc'
-    # XLS (старый бинарный формат)
-    if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
-        # дополнительная проверка на XLS (по сигнатуре внутри)
-        return '.xls'
-    # RTF
-    if content.startswith(b'{\\rtf'):
-        return '.rtf'
-    # По умолчанию — .bin
-    return '.bin'
 
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
 @app.get("/buy")
