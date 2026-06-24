@@ -597,6 +597,51 @@ async def package_files(
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
+# ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
+
+@app.get("/buy")
+async def buy_page():
+    """Страница покупки лицензии"""
+    with open("templates/buy.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+@app.post("/api/create-order")
+async def create_order():
+    """Создаёт заказ и генерирует ключ (симуляция оплаты)"""
+    license_key = database.create_license(days_valid=30)
+    if not license_key:
+        raise HTTPException(500, "Не удалось создать лицензию")
+    conn = database.get_db()
+    lic = conn.execute("SELECT expires_at FROM licenses WHERE license_key = ?", (license_key,)).fetchone()
+    conn.close()
+    return {
+        "status": "success",
+        "license_key": license_key,
+        "expires_at": lic["expires_at"] if lic else None
+    }
+
+@app.post("/api/activate-license")
+async def activate_license(data: dict):
+    key = data.get("key")
+    if not key:
+        raise HTTPException(400, "Ключ не указан")
+    result = database.verify_and_activate_license(key)
+    if not result["valid"]:
+        return {"valid": False, "reason": result["reason"]}
+    return {"valid": True, "expires_at": result["expires_at"]}
+
+@app.post("/api/verify-license")
+async def verify_license(data: dict):
+    key = data.get("key")
+    if not key:
+        raise HTTPException(400, "Ключ не указан")
+    result = database.verify_license(key)
+    if result is None:
+        return {"valid": False, "reason": "not_found"}
+    if not result["valid"]:
+        return {"valid": False, "reason": result["reason"]}
+    return {"valid": True, "expires_at": result["expires_at"]}
+
 # ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
 
 def analyze_tender_text(text: str, selected_fields: list) -> dict:
