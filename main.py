@@ -530,29 +530,7 @@ async def analyze_texts(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ РАСШИРЕНИЯ (запасная) =================
-def detect_extension(content: bytes) -> str:
-    """Определяет расширение файла по первым байтам (сигнатуре)."""
-    if content.startswith(b'%PDF'):
-        return '.pdf'
-    if len(content) > 4 and content[0:4] == b'PK\x03\x04':
-        if b'[Content_Types].xml' in content[:1000]:
-            if b'word/' in content[:1000]:
-                return '.docx'
-            if b'xl/' in content[:1000]:
-                return '.xlsx'
-        if b'META-INF' in content[:1000]:
-            return '.docx'
-        return '.zip'
-    if content[:100].strip().lower().startswith(b'<!DOCTYPE html') or content[:50].strip().lower().startswith(b'<html'):
-        return '.html'
-    if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
-        return '.doc'
-    if content.startswith(b'{\\rtf'):
-        return '.rtf'
-    return '.bin'
-
-# ================= ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (добавляет .docx если нет расширения) =================
+# ================= ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (без дублей) =================
 @app.post("/package_files")
 async def package_files(
     request: Request,
@@ -575,15 +553,29 @@ async def package_files(
         else:
             tender_id, original_name = "без_тендера", file.filename
         
-        # ===== ЕСЛИ РАСШИРЕНИЯ НЕТ — ДОБАВЛЯЕМ .docx =====
+        # Если расширения нет — добавляем .docx
         if '.' not in original_name:
             original_name = original_name + '.docx'
             print(f"🔍 Добавлено расширение .docx для: {original_name}")
-        # =============================================
         
         if tender_id not in tenders:
             tenders[tender_id] = []
         tenders[tender_id].append((original_name, content))
+    
+    # Убираем дубли внутри каждой папки
+    for tender_id, file_list in tenders.items():
+        seen_names = set()
+        new_list = []
+        for original_name, content in file_list:
+            base, ext = os.path.splitext(original_name)
+            counter = 1
+            new_name = original_name
+            while new_name in seen_names:
+                new_name = f"{base}_{counter}{ext}"
+                counter += 1
+            seen_names.add(new_name)
+            new_list.append((new_name, content))
+        tenders[tender_id] = new_list
     
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
@@ -620,13 +612,11 @@ async def package_files(
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
 @app.get("/buy")
 async def buy_page():
-    """Страница покупки лицензии"""
     with open("templates/buy.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
 @app.post("/api/create-order")
 async def create_order():
-    """Создаёт заказ и генерирует ключ (симуляция оплаты)"""
     license_key = database.create_license(days_valid=30)
     if not license_key:
         raise HTTPException(500, "Не удалось создать лицензию")
