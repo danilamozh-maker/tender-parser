@@ -544,44 +544,44 @@ async def package_files(
     if not files:
         raise HTTPException(400, "Нет файлов")
     
-    # Группируем файлы по тендерам
+    # Группируем файлы по тендерам и определяем расширение
     tenders = {}
     for file in files:
+        # Определяем расширение по содержимому
+        content = await file.read()
+        ext = detect_extension(content)
+        # Извлекаем номер тендера из имени файла
         parts = file.filename.split('_', 1)
         if len(parts) == 2:
             tender_id, original_name = parts[0], parts[1]
-            if tender_id not in tenders:
-                tenders[tender_id] = []
-            content = await file.read()
-            tenders[tender_id].append((original_name, content))
         else:
-            if "без_тендера" not in tenders:
-                tenders["без_тендера"] = []
-            content = await file.read()
-            tenders["без_тендера"].append((file.filename, content))
+            tender_id, original_name = "без_тендера", file.filename
+        
+        # Добавляем расширение, если его нет
+        if '.' not in original_name:
+            original_name = original_name + ext
+        
+        if tender_id not in tenders:
+            tenders[tender_id] = []
+        tenders[tender_id].append((original_name, content))
     
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
-        # Добавляем файлы по папкам
         for tender_id, file_list in tenders.items():
             folder_name = f"Тендер_{tender_id}"
             for original_name, content in file_list:
                 file_path = os.path.join(folder_name, original_name)
                 zip_file.writestr(file_path, content)
         
-        # Если есть анализ, создаём Word-документ
         if analysis_text:
             doc = Document()
             doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
             doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
             doc.add_paragraph('=' * 50)
-            
-            # Парсим анализ по тендерам (разделитель === Тендер ... ===)
             sections = analysis_text.split('=== Тендер')
             for section in sections:
                 if section.strip():
                     doc.add_paragraph(section.strip())
-            
             word_buffer = io.BytesIO()
             doc.save(word_buffer)
             word_buffer.seek(0)
@@ -596,6 +596,45 @@ async def package_files(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
+
+
+def detect_extension(content: bytes) -> str:
+    """Определяет расширение файла по первым байтам."""
+    # PDF
+    if content.startswith(b'%PDF'):
+        return '.pdf'
+    # DOCX / XLSX / ZIP
+    if len(content) > 4 and content[0:4] == b'PK\x03\x04':
+        # Пытаемся определить по содержимому внутри ZIP
+        # Если внутри есть [Content_Types].xml — это DOCX или XLSX
+        if b'[Content_Types].xml' in content[:1000]:
+            if b'word/' in content[:1000]:
+                return '.docx'
+            if b'xl/' in content[:1000]:
+                return '.xlsx'
+        # Если внутри есть META-INF — это DOCX
+        if b'META-INF' in content[:1000]:
+            return '.docx'
+        # По умолчанию считаем ZIP
+        return '.zip'
+    # HTML
+    if content[:100].strip().lower().startswith(b'<!DOCTYPE html') or content[:50].strip().lower().startswith(b'<html'):
+        return '.html'
+    # TXT
+    if content[:50].strip().replace(b'\n', b'').replace(b'\r', b'').replace(b' ', b'').isalnum() or b' ' in content[:50]:
+        return '.txt'
+    # DOC (старый бинарный формат)
+    if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
+        return '.doc'
+    # XLS (старый бинарный формат)
+    if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
+        # дополнительная проверка на XLS (по сигнатуре внутри)
+        return '.xls'
+    # RTF
+    if content.startswith(b'{\\rtf'):
+        return '.rtf'
+    # По умолчанию — .bin
+    return '.bin'
 
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
 @app.get("/buy")
