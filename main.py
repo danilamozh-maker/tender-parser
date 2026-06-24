@@ -40,7 +40,7 @@ def get_current_user(request: Request):
     user = database.get_user(email)
     return user
 
-# ================= СТРАНИЦЫ АВТОРИЗАЦИИ =================
+# ================= СТРАНИЦЫ АВТОРИЗАЦИИ (без изменений) =================
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     error = request.query_params.get("error", "")
@@ -480,7 +480,7 @@ async def analyze_texts(request: Request, data: dict):
             return {
                 "url": tender.get("url", ""),
                 "reg_number": tender.get("regNumber", ""),
-                "error": "Недостаточно текста для анализа"
+                "error": "Недостаточно текста dla анализа"
             }
         start = time.time()
         analysis_result = analyze_tender_text(tender_text, selected_fields)
@@ -530,7 +530,7 @@ async def analyze_texts(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ =================
+# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (без анализа) =================
 @app.post("/package_files")
 async def package_files(
     request: Request,
@@ -598,7 +598,6 @@ async def package_files(
     )
 
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
-
 @app.get("/buy")
 async def buy_page():
     """Страница покупки лицензии"""
@@ -661,6 +660,7 @@ def analyze_tender_text(text: str, selected_fields: list) -> dict:
         ]
     
     fields_str = "\n".join([f"{field}: " for field in selected_fields])
+    
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
