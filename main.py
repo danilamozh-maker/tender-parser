@@ -543,6 +543,10 @@ async def package_files(
     if not files:
         raise HTTPException(400, "Нет файлов")
     
+    print("📥 Получены файлы:")
+    for file in files:
+        print(f" - Имя: {file.filename}")
+    
     tenders = {}
     for file in files:
         content = await file.read()
@@ -552,15 +556,13 @@ async def package_files(
         else:
             tender_id, original_name = "без_тендера", file.filename
         
-        # Определяем тип файла по сигнатуре
-        file_type = detect_file_type(content)
+        print(f"🔍 tender_id: {tender_id}, original_name: {original_name}")
         
-        # Формируем правильное имя
+        file_type = detect_file_type(content)
         base_name = os.path.splitext(original_name)[0]
         if not base_name or base_name == '':
             base_name = 'file'
         
-        # Добавляем правильное расширение
         if file_type == 'pdf':
             original_name = base_name + '.pdf'
         elif file_type == 'xlsx':
@@ -570,16 +572,14 @@ async def package_files(
         elif file_type == 'docx':
             original_name = base_name + '.docx'
         else:
-            # Если тип не определён — ставим .docx
             original_name = base_name + '.docx'
         
-        print(f"🔍 Тип: {file_type}, имя: {original_name}")
+        print(f"📄 Итоговое имя: {original_name}")
         
         if tender_id not in tenders:
             tenders[tender_id] = []
         tenders[tender_id].append((original_name, content))
     
-    # Убираем дубли внутри каждой папки
     for tender_id, file_list in tenders.items():
         seen_names = set()
         new_list = []
@@ -625,6 +625,7 @@ async def package_files(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
+
 
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
 @app.get("/buy")
