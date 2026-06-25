@@ -32,7 +32,6 @@ MAX_TENDERS = 15
 # ============================================
 
 # ================= ВРЕМЕННОЕ ХРАНИЛИЩЕ ДЛЯ ПРОБНОГО ПЕРИОДА =================
-# В реальном проекте используй базу данных
 trials = {} # {device_id: start_date}
 
 # ================= АВТОРИЗАЦИЯ =================
@@ -510,29 +509,58 @@ async def analyze_texts(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА =================
+# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА (ИСПРАВЛЕННАЯ) =================
 def detect_file_type(content: bytes) -> str:
-    """Определяет тип файла по сигнатуре."""
+    """Определяет тип файла по сигнатуре (магическим байтам)."""
+    # Проверяем первые байты для диагностики
+    hex_bytes = content[:20].hex()
+    print(f"🔎 Первые байты: {hex_bytes}")
+
+    # PDF
     if content.startswith(b'%PDF'):
         return 'pdf'
-    if len(content) > 4 and content[:4] == b'PK\x03\x04':
+    # ZIP (DOCX, XLSX, PPTX) - начинается с PK
+    if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
+        # Пытаемся уточнить, является ли это DOCX или XLSX
         if b'[Content_Types].xml' in content[:2000]:
             if b'xl/' in content[:2000]:
                 return 'xlsx'
             if b'word/' in content[:2000]:
                 return 'docx'
-        if b'META-INF' in content[:2000]:
-            return 'docx'
+        # Если не удалось, считаем просто ZIP
         return 'zip'
-    if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
+    # RAR 1.5+ (Rar!\x1a\x07\x00)
+    if content.startswith(b'Rar!\x1a\x07\x00'):
+        return 'rar'
+    # RAR 5.0 (Rar!\x1a\x07\x01\x00)
+    if content.startswith(b'Rar!\x1a\x07\x01\x00'):
+        return 'rar'
+    # RAR общий (Rar!)
+    if content.startswith(b'Rar!'):
+        return 'rar'
+    # XLS (OLE) — D0 CF 11 E0 A1 B1 1A E1
+    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+        # Проверяем, содержит ли OLE структуру Workbook
         if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
             return 'xls'
+        # Иначе считаем DOC (или другой OLE)
         return 'doc'
+    # 7z
+    if content.startswith(b'7z\xbc\xaf\x27\x1c'):
+        return '7z'
+    # PNG
+    if content.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png'
+    # JPEG
+    if content.startswith(b'\xff\xd8\xff'):
+        return 'jpg'
+    # RTF
     if content.startswith(b'{\\rtf'):
         return 'rtf'
+    # Если ничего не подошло
     return 'unknown'
 
-# ================= УПАКОВКА ФАЙЛОВ =================
+# ================= УПАКОВКА ФАЙЛОВ (ИСПРАВЛЕННАЯ) =================
 @app.post("/package_files")
 async def package_files(
     request: Request,
@@ -547,15 +575,19 @@ async def package_files(
     tenders = {}
     for file in files:
         content = await file.read()
+        # Разбираем имя файла: тендер_id_оригинальное_имя
         parts = file.filename.split('_', 1)
         if len(parts) == 2:
             tender_id, original_name = parts[0], parts[1]
         else:
             tender_id, original_name = "без_тендера", file.filename
+
         file_type = detect_file_type(content)
         base_name = os.path.splitext(original_name)[0]
         if not base_name or base_name == '':
             base_name = 'file'
+
+        # Присваиваем правильное расширение
         if file_type == 'pdf':
             original_name = base_name + '.pdf'
         elif file_type == 'xlsx':
@@ -564,12 +596,33 @@ async def package_files(
             original_name = base_name + '.xls'
         elif file_type == 'docx':
             original_name = base_name + '.docx'
+        elif file_type == 'rar':
+            original_name = base_name + '.rar'
+        elif file_type == 'zip':
+            original_name = base_name + '.zip'
+        elif file_type == '7z':
+            original_name = base_name + '.7z'
+        elif file_type == 'png':
+            original_name = base_name + '.png'
+        elif file_type == 'jpg':
+            original_name = base_name + '.jpg'
+        elif file_type == 'rtf':
+            original_name = base_name + '.rtf'
         else:
-            original_name = base_name + '.docx'
+            # Если тип не определён, оставляем исходное расширение (если оно есть)
+            if '.' in original_name:
+                # уже есть расширение, ничего не делаем
+                pass
+            else:
+                original_name = base_name + '.bin' # неизвестный тип
+
         print(f"🔍 Тип: {file_type}, имя: {original_name}")
+
         if tender_id not in tenders:
             tenders[tender_id] = []
         tenders[tender_id].append((original_name, content))
+
+    # Дедупликация внутри каждой папки тендера
     for tender_id, file_list in tenders.items():
         seen_names = set()
         new_list = []
@@ -583,6 +636,8 @@ async def package_files(
             seen_names.add(new_name)
             new_list.append((new_name, content))
         tenders[tender_id] = new_list
+
+    # Создание ZIP-архива
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
         for tender_id, file_list in tenders.items():
@@ -603,6 +658,7 @@ async def package_files(
             doc.save(word_buffer)
             word_buffer.seek(0)
             zip_file.writestr("анализ_тендеров.docx", word_buffer.getvalue())
+
     zip_buffer.seek(0)
     filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded_filename = quote(filename)
