@@ -7,7 +7,7 @@ import re
 import time
 import asyncio
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from docx import Document
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
@@ -31,6 +31,11 @@ MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 # ============================================
 
+# ================= ВРЕМЕННОЕ ХРАНИЛИЩЕ ДЛЯ ПРОБНОГО ПЕРИОДА =================
+# В реальном проекте используй базу данных
+trials = {} # {device_id: start_date}
+
+# ================= АВТОРИЗАЦИЯ =================
 def get_current_user(request: Request):
     email = request.cookies.get("user_email")
     if not email:
@@ -262,6 +267,7 @@ def analyze_file(file_path, selected_fields):
         return answer
     return "\n".join(filtered_lines)
 
+# ================= ПОИСК ТЕНДЕРОВ =================
 @app.post("/search_tenders")
 async def search_tenders(request: Request, data: dict):
     user = get_current_user(request)
@@ -317,6 +323,7 @@ async def search_tenders(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
+# ================= ПОДБОР КЛЮЧЕВЫХ СЛОВ =================
 @app.post("/suggest_keywords")
 async def suggest_keywords(request: Request, data: dict):
     user = get_current_user(request)
@@ -335,6 +342,7 @@ async def suggest_keywords(request: Request, data: dict):
     keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
     return {"keywords": keywords[:7]}
 
+# ================= ЭНДПОЙНТ ДЛЯ AI-ЧАТА =================
 @app.post("/ask_ai")
 async def ask_ai(request: Request, data: dict):
     user = get_current_user(request)
@@ -351,6 +359,7 @@ async def ask_ai(request: Request, data: dict):
     answer = query_deepseek(prompt)
     return {"answer": answer}
 
+# ================= ГЛАВНАЯ СТРАНИЦА =================
 @app.get("/", response_class=HTMLResponse)
 async def main(request: Request):
     user = get_current_user(request)
@@ -360,6 +369,7 @@ async def main(request: Request):
         html_content = f.read()
     return HTMLResponse(content=html_content)
 
+# ================= АНАЛИЗ ФАЙЛОВ (ручная загрузка) =================
 @app.post("/analyze")
 async def analyze_files(
     request: Request,
@@ -425,6 +435,7 @@ async def analyze_files(
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
 
+# ================= АНАЛИЗ ПЕЧАТНЫХ ФОРМ (из расширения) =================
 @app.post("/analyze_texts")
 async def analyze_texts(request: Request, data: dict):
     start_total = time.time()
@@ -499,14 +510,11 @@ async def analyze_texts(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= ФУНКЦИЯ ОПРЕДЕЛЕНИЯ ТИПА ФАЙЛА =================
+# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА =================
 def detect_file_type(content: bytes) -> str:
     """Определяет тип файла по сигнатуре."""
-    # PDF: %PDF
     if content.startswith(b'%PDF'):
         return 'pdf'
-    
-    # DOCX / XLSX / ZIP
     if len(content) > 4 and content[:4] == b'PK\x03\x04':
         if b'[Content_Types].xml' in content[:2000]:
             if b'xl/' in content[:2000]:
@@ -516,20 +524,15 @@ def detect_file_type(content: bytes) -> str:
         if b'META-INF' in content[:2000]:
             return 'docx'
         return 'zip'
-    
-    # DOC / XLS (старый бинарный формат)
     if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
         if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
             return 'xls'
         return 'doc'
-    
-    # RTF
     if content.startswith(b'{\\rtf'):
         return 'rtf'
-    
     return 'unknown'
 
-# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ =================
+# ================= УПАКОВКА ФАЙЛОВ =================
 @app.post("/package_files")
 async def package_files(
     request: Request,
@@ -539,14 +542,8 @@ async def package_files(
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Не авторизован")
-    
     if not files:
         raise HTTPException(400, "Нет файлов")
-    
-    print("📥 Получены файлы:")
-    for file in files:
-        print(f" - Имя: {file.filename}")
-    
     tenders = {}
     for file in files:
         content = await file.read()
@@ -555,14 +552,10 @@ async def package_files(
             tender_id, original_name = parts[0], parts[1]
         else:
             tender_id, original_name = "без_тендера", file.filename
-        
-        print(f"🔍 tender_id: {tender_id}, original_name: {original_name}")
-        
         file_type = detect_file_type(content)
         base_name = os.path.splitext(original_name)[0]
         if not base_name or base_name == '':
             base_name = 'file'
-        
         if file_type == 'pdf':
             original_name = base_name + '.pdf'
         elif file_type == 'xlsx':
@@ -573,13 +566,10 @@ async def package_files(
             original_name = base_name + '.docx'
         else:
             original_name = base_name + '.docx'
-        
-        print(f"📄 Итоговое имя: {original_name}")
-        
+        print(f"🔍 Тип: {file_type}, имя: {original_name}")
         if tender_id not in tenders:
             tenders[tender_id] = []
         tenders[tender_id].append((original_name, content))
-    
     for tender_id, file_list in tenders.items():
         seen_names = set()
         new_list = []
@@ -593,7 +583,6 @@ async def package_files(
             seen_names.add(new_name)
             new_list.append((new_name, content))
         tenders[tender_id] = new_list
-    
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
         for tender_id, file_list in tenders.items():
@@ -601,7 +590,6 @@ async def package_files(
             for original_name, content in file_list:
                 file_path = os.path.join(folder_name, original_name)
                 zip_file.writestr(file_path, content)
-        
         if analysis_text:
             doc = Document()
             doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
@@ -615,17 +603,39 @@ async def package_files(
             doc.save(word_buffer)
             word_buffer.seek(0)
             zip_file.writestr("анализ_тендеров.docx", word_buffer.getvalue())
-    
     zip_buffer.seek(0)
     filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded_filename = quote(filename)
-    
     return Response(
         zip_buffer.getvalue(),
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
+# ================= ЭНДПОЙНТЫ ДЛЯ ПРОБНОГО ПЕРИОДА =================
+@app.post("/api/trial/start")
+async def start_trial(data: dict):
+    device_id = data.get("device_id")
+    if not device_id:
+        raise HTTPException(400, "device_id не указан")
+    if device_id in trials:
+        return {"status": "ok", "trial_start": trials[device_id].isoformat()}
+    trials[device_id] = datetime.now()
+    return {"status": "ok", "trial_start": trials[device_id].isoformat()}
+
+@app.post("/api/trial/status")
+async def check_trial(data: dict):
+    device_id = data.get("device_id")
+    if not device_id:
+        raise HTTPException(400, "device_id не указан")
+    if device_id not in trials:
+        return {"status": "not_started"}
+    start_date = trials[device_id]
+    days_passed = (datetime.now() - start_date).days
+    if days_passed >= 2:
+        return {"status": "expired", "days": days_passed}
+    else:
+        return {"status": "active", "days_left": 2 - days_passed}
 
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
 @app.get("/buy")
@@ -669,6 +679,7 @@ async def verify_license(data: dict):
         return {"valid": False, "reason": result["reason"]}
     return {"valid": True, "expires_at": result["expires_at"]}
 
+# ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
 def analyze_tender_text(text: str, selected_fields: list) -> dict:
     if not selected_fields:
         selected_fields = [
