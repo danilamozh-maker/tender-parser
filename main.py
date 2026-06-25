@@ -499,7 +499,37 @@ async def analyze_texts(request: Request, data: dict):
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
-# ================= ФИНАЛЬНЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ (с принудительным .docx) =================
+# ================= ФУНКЦИЯ ОПРЕДЕЛЕНИЯ ТИПА ФАЙЛА =================
+def detect_file_type(content: bytes) -> str:
+    """Определяет тип файла по сигнатуре."""
+    # PDF: %PDF
+    if content.startswith(b'%PDF'):
+        return 'pdf'
+    
+    # DOCX / XLSX / ZIP
+    if len(content) > 4 and content[:4] == b'PK\x03\x04':
+        if b'[Content_Types].xml' in content[:2000]:
+            if b'xl/' in content[:2000]:
+                return 'xlsx'
+            if b'word/' in content[:2000]:
+                return 'docx'
+        if b'META-INF' in content[:2000]:
+            return 'docx'
+        return 'zip'
+    
+    # DOC / XLS (старый бинарный формат)
+    if content[:8] == b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1':
+        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
+            return 'xls'
+        return 'doc'
+    
+    # RTF
+    if content.startswith(b'{\\rtf'):
+        return 'rtf'
+    
+    return 'unknown'
+
+# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ УПАКОВКИ ФАЙЛОВ =================
 @app.post("/package_files")
 async def package_files(
     request: Request,
@@ -513,9 +543,6 @@ async def package_files(
     if not files:
         raise HTTPException(400, "Нет файлов")
     
-    # Разрешённые расширения (оставляем как есть)
-    ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.xlsx', '.xls', '.txt'}
-    
     tenders = {}
     for file in files:
         content = await file.read()
@@ -525,29 +552,28 @@ async def package_files(
         else:
             tender_id, original_name = "без_тендера", file.filename
         
-        # Извлекаем расширение (в нижнем регистре)
-        base, ext = os.path.splitext(original_name)
-        ext_lower = ext.lower()
+        # Определяем тип файла по сигнатуре
+        file_type = detect_file_type(content)
         
-        # ===== 1. ОПРЕДЕЛЯЕМ PDF ПО СИГНАТУРЕ =====
-        is_pdf = content.startswith(b'%PDF')
+        # Формируем правильное имя
+        base_name = os.path.splitext(original_name)[0]
+        if not base_name or base_name == '':
+            base_name = 'file'
         
-        # ===== 2. ФОРМИРУЕМ ПРАВИЛЬНОЕ ИМЯ =====
-        if is_pdf:
-            # Если это PDF — ставим .pdf
-            if not base or base == '':
-                base = 'file'
-            original_name = base + '.pdf'
-            print(f"🔍 Определён PDF: {original_name}")
-        elif not ext_lower or ext_lower not in ALLOWED_EXTENSIONS:
-            # Если расширения нет или оно не разрешено — заменяем на .docx
-            if not base or base == '':
-                base = 'file'
-            original_name = base + '.docx'
-            print(f"🔍 Расширение заменено на .docx для: {original_name}")
+        # Добавляем правильное расширение
+        if file_type == 'pdf':
+            original_name = base_name + '.pdf'
+        elif file_type == 'xlsx':
+            original_name = base_name + '.xlsx'
+        elif file_type == 'xls':
+            original_name = base_name + '.xls'
+        elif file_type == 'docx':
+            original_name = base_name + '.docx'
         else:
-            # Если расширение разрешено — оставляем как есть
-            original_name = base + ext_lower
+            # Если тип не определён — ставим .docx
+            original_name = base_name + '.docx'
+        
+        print(f"🔍 Тип: {file_type}, имя: {original_name}")
         
         if tender_id not in tenders:
             tenders[tender_id] = []
@@ -642,7 +668,6 @@ async def verify_license(data: dict):
         return {"valid": False, "reason": result["reason"]}
     return {"valid": True, "expires_at": result["expires_at"]}
 
-# ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
 def analyze_tender_text(text: str, selected_fields: list) -> dict:
     if not selected_fields:
         selected_fields = [
