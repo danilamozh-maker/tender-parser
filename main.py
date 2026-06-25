@@ -525,13 +525,28 @@ async def package_files(
         else:
             tender_id, original_name = "без_тендера", file.filename
         
-        # Принудительно заменяем расширение, если оно не в белом списке
+        # Извлекаем расширение (в нижнем регистре)
         base, ext = os.path.splitext(original_name)
         ext_lower = ext.lower()
-        if not ext_lower or ext_lower not in ALLOWED_EXTENSIONS:
+        
+        # ===== 1. ОПРЕДЕЛЯЕМ PDF ПО СИГНАТУРЕ =====
+        is_pdf = content.startswith(b'%PDF')
+        
+        # ===== 2. ФОРМИРУЕМ ПРАВИЛЬНОЕ ИМЯ =====
+        if is_pdf:
+            # Если это PDF — ставим .pdf
+            if not base or base == '':
+                base = 'file'
+            original_name = base + '.pdf'
+            print(f"🔍 Определён PDF: {original_name}")
+        elif not ext_lower or ext_lower not in ALLOWED_EXTENSIONS:
+            # Если расширения нет или оно не разрешено — заменяем на .docx
+            if not base or base == '':
+                base = 'file'
             original_name = base + '.docx'
             print(f"🔍 Расширение заменено на .docx для: {original_name}")
         else:
+            # Если расширение разрешено — оставляем как есть
             original_name = base + ext_lower
         
         if tender_id not in tenders:
