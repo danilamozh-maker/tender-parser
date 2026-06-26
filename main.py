@@ -28,11 +28,15 @@ MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 # ============================================
 
-# ================= ИНИЦИАЛИЗАЦИЯ БД =================
+# ================= ИНИЦИАЛИЗАЦИЯ БД (с защитой от падений) =================
 @app.on_event("startup")
 async def startup():
-    await database.init_db()
-    print("✅ База данных PostgreSQL инициализирована")
+    try:
+        await database.init_db()
+        print("✅ База данных PostgreSQL инициализирована")
+    except Exception as e:
+        print(f"❌ Ошибка инициализации БД: {e}")
+        # Приложение продолжит работу, даже если БД не подключилась
 
 # ================= ПРОВЕРКА ЛИЦЕНЗИИ =================
 async def verify_license_from_request(request: Request):
@@ -45,6 +49,15 @@ async def verify_license_from_request(request: Request):
     if not result.get("valid"):
         raise HTTPException(401, detail=result.get("reason", "Invalid license"))
     return license_key
+
+# ================= ЭНДПОЙНТЫ HEALTH CHECK =================
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Tender Parser API is running"}
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 # ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
 def read_docx(file_path):
