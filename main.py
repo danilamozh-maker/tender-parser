@@ -333,8 +333,102 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
+# ================= ЭНДПОЙНТЫ ДЛЯ ПРОБНОГО ПЕРИОДА (С БД) =================
+
+@app.post("/api/trial/start")
+async def start_trial(data: dict):
+    device_id = data.get("device_id")
+    if not device_id:
+        raise HTTPException(400, "device_id не указан")
+    result = await database.start_trial(device_id, trial_days=2)
+    return result
+
+@app.post("/api/trial/status")
+async def check_trial(data: dict):
+    device_id = data.get("device_id")
+    if not device_id:
+        raise HTTPException(400, "device_id не указан")
+    result = await database.get_trial_status(device_id)
+    return result
+
+# ================= ОСТАЛЬНЫЕ ЭНДПОЙНТЫ (опционально) =================
+@app.post("/search_tenders")
+async def search_tenders(request: Request, data: dict):
+    await verify_license_from_request(request)
+    query = data.get("query", "").strip()
+    limit = data.get("limit", MAX_TENDERS)
+    if not query:
+        raise HTTPException(400, "Введите ключевые слова для поиска")
+    tender_urls = parser.search_tenders_zakupki(query, limit)
+    if not tender_urls:
+        return {"detail": "Тендеры по вашему запросу не найдены"}
+    base_dir = f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    os.makedirs(base_dir, exist_ok=True)
+    results = []
+    for idx, tender_url in enumerate(tender_urls[:MAX_TENDERS], 1):
+        tender_name = f"Тендер_{idx}"
+        tender_dir = os.path.join(base_dir, tender_name)
+        os.makedirs(tender_dir, exist_ok=True)
+        files = parser.download_files_from_tender(tender_url, tender_dir)
+        if files:
+            combined_text = ""
+            for file_path in files:
+                text = read_docx(file_path) if file_path.endswith('.docx') else read_txt(file_path) if file_path.endswith('.txt') else read_excel(file_path)
+                if text and not text.startswith("Ошибка"):
+                    combined_text += text + "\n"
+            results.append({
+                "tender_name": tender_name,
+                "files": files,
+                "text": combined_text[:5000]
+            })
+        time.sleep(2)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+        for res in results:
+            doc = Document()
+            doc.add_heading(f'Анализ тендера: {res["tender_name"]}', 0)
+            doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+            doc.add_paragraph('=' * 50)
+            doc.add_paragraph(res["text"] if res["text"] else "Не удалось извлечь текст из документов")
+            word_buf = io.BytesIO()
+            doc.save(word_buf)
+            word_buf.seek(0)
+            zf.writestr(f"{res['tender_name']}_результат.docx", word_buf.getvalue())
+    zip_buffer.seek(0)
+    filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    encoded = quote(filename)
+    if os.path.exists(base_dir):
+        shutil.rmtree(base_dir)
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+
+@app.post("/suggest_keywords")
+async def suggest_keywords(request: Request, data: dict):
+    await verify_license_from_request(request)
+    description = data.get("description", "").strip()
+    if not description:
+        raise HTTPException(400, "Описание не может быть пустым")
+    prompt = f"""Ты — помощник по тендерам. Пользователь описал свою деятельность:
+"{description}"
+Выдели 5–7 ключевых слов для поиска тендеров на zakupki.gov.ru.
+Ключевые слова должны быть конкретными (например, "строительство школы", "поставка медоборудования", "ремонт дорог").
+Выдай ТОЛЬКО список слов через запятую, без лишнего текста."""
+    answer = query_deepseek(prompt)
+    keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
+    return {"keywords": keywords[:7]}
+
+@app.post("/ask_ai")
+async def ask_ai(request: Request, data: dict):
+    await verify_license_from_request(request)
+    question = data.get("question", "").strip()
+    if not question:
+        raise HTTPException(400, "Введите вопрос")
+    prompt = f"""Ты — консультант по тендерам и бизнес-процессам. Ответь на вопрос пользователя чётко, по делу, без воды.
+Вопрос пользователя: {question}
+Дай ответ в виде текста (2-4 предложения), который будет полезен для бизнеса."""
+    answer = query_deepseek(prompt)
+    return {"answer": answer}
+
 # ================= ЗАПУСК =================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-    
