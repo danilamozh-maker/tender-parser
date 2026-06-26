@@ -10,7 +10,7 @@ from datetime import datetime
 from docx import Document
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from urllib.parse import quote
 import openpyxl
 import xlrd
@@ -74,6 +74,23 @@ async def health():
 async def download_page():
     with open("templates/download.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
+
+# ================= ЭНДПОЙНТ ДЛЯ СКАЧИВАНИЯ ФАЙЛОВ =================
+@app.get("/download-file/{filename}")
+async def download_file(filename: str):
+    # Безопасность: разрешаем скачивать только наши файлы
+    allowed_files = ["tender-parser-extension.crx", "tender-parser-extension.zip"]
+    if filename not in allowed_files:
+        raise HTTPException(404, "Файл не найден")
+    file_path = os.path.join(os.path.dirname(__file__), filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "Файл не найден на сервере")
+    # Определяем MIME-тип
+    if filename.endswith(".crx"):
+        media_type = "application/x-chrome-extension"
+    else:
+        media_type = "application/zip"
+    return FileResponse(file_path, media_type=media_type, filename=filename)
 
 # ================= ЭНДПОЙНТ ДЛЯ ГЕНЕРАЦИИ ЛИЦЕНЗИИ (через админ-токен) =================
 @app.post("/api/create-order")
