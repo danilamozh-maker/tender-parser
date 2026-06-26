@@ -69,52 +69,24 @@ async def root():
 async def health():
     return {"status": "ok"}
 
-# ================= ЭНДПОЙНТ ДЛЯ ГЕНЕРАЦИИ ЛИЦЕНЗИИ =================
-@app.get("/buy", response_class=HTMLResponse)
-async def buy_page():
-    # Создаём новую лицензию со сроком 30 дней
+# ================= СТРАНИЦА СКАЧИВАНИЯ И ПОКУПКИ =================
+@app.get("/download", response_class=HTMLResponse)
+async def download_page():
+    with open("templates/download.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+# ================= ЭНДПОЙНТ ДЛЯ ГЕНЕРАЦИИ ЛИЦЕНЗИИ (через админ-токен) =================
+@app.post("/api/create-order")
+async def create_order(request: Request):
+    admin_token = request.headers.get("X-Admin-Token")
+    if admin_token != ADMIN_TOKEN:
+        raise HTTPException(403, "Invalid admin token")
     license_key = await database.create_license(days_valid=30)
     if not license_key:
-        return HTMLResponse("""
-        <html><body><h1>❌ Ошибка</h1><p>Не удалось создать лицензию. Попробуйте позже.</p></body></html>
-        """)
-    
-    # Получаем дату истечения
+        raise HTTPException(500, "Не удалось создать лицензию")
     result = await database.verify_license(license_key)
-    expires_at = result.get("expires_at") if result and result.get("valid") else "неизвестно"
-    
-    # Формируем красивую страницу
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>Ваша лицензия</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; background: #f0f4f8; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }}
-            .card {{ background: white; padding: 40px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.1); max-width: 500px; width: 100%; text-align: center; }}
-            h1 {{ color: #1e293b; margin-bottom: 10px; }}
-            .key {{ background: #f1f5f9; padding: 16px; border-radius: 10px; font-family: monospace; font-size: 20px; letter-spacing: 2px; color: #0f172a; word-break: break-all; margin: 20px 0; }}
-            .info {{ color: #475569; font-size: 14px; }}
-            .btn {{ display: inline-block; margin-top: 20px; padding: 10px 24px; background: #10b981; color: white; border-radius: 8px; text-decoration: none; font-weight: 600; }}
-            .btn:hover {{ background: #059669; }}
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h1>🔑 Ваша лицензия</h1>
-            <p class="info">Лицензия действует 30 дней с момента активации.</p>
-            <div class="key">{license_key}</div>
-            <p class="info">Действительна до: <strong>{expires_at}</strong></p>
-            <p class="info">Скопируйте этот ключ и вставьте его в расширение.</p>
-            <button class="btn" onclick="navigator.clipboard.writeText('{license_key}')">📋 Скопировать</button>
-            <br><br>
-            <a href="https://danilamozh-maker-tender-parser-47bd.twc1.net/" style="color: #667eea; text-decoration: none;">← Вернуться на главную</a>
-        </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
+    expires_at = result.get("expires_at") if result and result.get("valid") else None
+    return {"status": "success", "license_key": license_key, "expires_at": expires_at}
 
 # ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
 def read_docx(file_path):
@@ -212,19 +184,6 @@ def analyze_file(file_path, selected_fields):
 
 # ================= ЭНДПОЙНТЫ (защищённые) =================
 
-# --- Создание лицензии (для Tilda, через админский токен) ---
-@app.post("/api/create-order")
-async def create_order(request: Request):
-    admin_token = request.headers.get("X-Admin-Token")
-    if admin_token != ADMIN_TOKEN:
-        raise HTTPException(403, "Invalid admin token")
-    license_key = await database.create_license(days_valid=30)
-    if not license_key:
-        raise HTTPException(500, "Не удалось создать лицензию")
-    result = await database.verify_license(license_key)
-    expires_at = result.get("expires_at") if result and result.get("valid") else None
-    return {"status": "success", "license_key": license_key, "expires_at": expires_at}
-
 # --- Проверка лицензии (для расширения) ---
 @app.post("/api/verify-license")
 async def verify_license_endpoint(request: Request):
@@ -234,7 +193,7 @@ async def verify_license_endpoint(request: Request):
     except HTTPException:
         return {"valid": False, "reason": "Unauthorized"}
 
-# --- АКТИВАЦИЯ ЛИЦЕНЗИИ (ВОССТАНОВЛЕН) ---
+# --- АКТИВАЦИЯ ЛИЦЕНЗИИ ---
 @app.post("/api/activate-license")
 async def activate_license(data: dict):
     key = data.get("key")
