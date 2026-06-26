@@ -234,6 +234,17 @@ async def verify_license_endpoint(request: Request):
     except HTTPException:
         return {"valid": False, "reason": "Unauthorized"}
 
+# --- АКТИВАЦИЯ ЛИЦЕНЗИИ (ВОССТАНОВЛЕН) ---
+@app.post("/api/activate-license")
+async def activate_license(data: dict):
+    key = data.get("key")
+    if not key:
+        raise HTTPException(400, "Ключ не указан")
+    result = await database.verify_and_activate_license(key)
+    if not result["valid"]:
+        return {"valid": False, "reason": result["reason"]}
+    return {"valid": True, "expires_at": result["expires_at"]}
+
 # --- Анализ текстов (печатных форм) ---
 @app.post("/analyze_texts")
 async def analyze_texts(request: Request, data: dict):
