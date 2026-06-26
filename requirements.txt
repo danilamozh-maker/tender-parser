@@ -10,3 +10,4 @@ passlib
 beautifulsoup4
 lxml
 pdfplumber
+asyncpg
