@@ -24,14 +24,15 @@ async def get_pool():
             user=DB_USER,
             password=DB_PASSWORD,
             min_size=1,
-            max_size=10
+            max_size=10,
+            timeout=30
         )
     return _pool
 
 async def init_db():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Таблицы пользователей, лицензий, кэша, тарифов (как было)
+        # Таблицы
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -68,7 +69,6 @@ async def init_db():
                 UNIQUE(user_email, month_year)
             )
         """)
-        # НОВАЯ ТАБЛИЦА для хранения пробных периодов
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS device_trials (
                 device_id TEXT PRIMARY KEY,
@@ -209,20 +209,16 @@ async def check_and_increment_usage(email):
         )
         return True
 
-# ================= ПРОБНЫЙ ПЕРИОД (НОВЫЕ ФУНКЦИИ) =================
+# ================= ПРОБНЫЙ ПЕРИОД =================
 async def start_trial(device_id: str, trial_days: int = 2):
-    """Сохраняет начало пробного периода для device_id."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Проверяем, есть ли уже запись
         row = await conn.fetchrow(
             "SELECT start_date FROM device_trials WHERE device_id = $1",
             device_id
         )
         if row:
-            # Если уже есть, возвращаем существующую дату (не обновляем)
             return {"status": "ok", "trial_start": row["start_date"]}
-        # Если нет — создаём новую запись
         now = datetime.now()
         await conn.execute(
             "INSERT INTO device_trials (device_id, start_date, trial_days) VALUES ($1, $2, $3)",
@@ -231,7 +227,6 @@ async def start_trial(device_id: str, trial_days: int = 2):
         return {"status": "ok", "trial_start": now}
 
 async def get_trial_status(device_id: str):
-    """Возвращает статус пробного периода для device_id."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -251,3 +246,8 @@ async def get_trial_status(device_id: str):
                 "days_left": trial_days - days_passed,
                 "trial_end": (start_date + timedelta(days=trial_days)).isoformat()
             }
+
+# Новая функция: просто проверяет, активен ли пробный период (без деталей)
+async def check_trial_by_device(device_id: str) -> bool:
+    status = await get_trial_status(device_id)
+    return status.get("status") == "active"
