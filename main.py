@@ -36,19 +36,29 @@ async def startup():
         print("✅ База данных PostgreSQL инициализирована")
     except Exception as e:
         print(f"❌ Ошибка инициализации БД: {e}")
-        # Приложение продолжит работу, даже если БД не подключилась
 
-# ================= ПРОВЕРКА ЛИЦЕНЗИИ =================
-async def verify_license_from_request(request: Request):
+# ================= ПРОВЕРКА ДОСТУПА (ЛИЦЕНЗИЯ ИЛИ ПРОБНЫЙ ПЕРИОД) =================
+async def check_access(request: Request):
+    """
+    Проверяет наличие либо валидной лицензии (X-License-Key),
+    либо активного пробного периода (X-Device-ID).
+    """
+    # 1. Проверяем лицензию
     license_key = request.headers.get("X-License-Key")
-    if not license_key:
-        raise HTTPException(401, detail="License key required")
-    result = await database.verify_license(license_key)
-    if result is None:
-        raise HTTPException(401, detail="License not found")
-    if not result.get("valid"):
-        raise HTTPException(401, detail=result.get("reason", "Invalid license"))
-    return license_key
+    if license_key:
+        result = await database.verify_license(license_key)
+        if result and result.get("valid"):
+            return True
+
+    # 2. Проверяем пробный период
+    device_id = request.headers.get("X-Device-ID")
+    if device_id:
+        is_active = await database.check_trial_by_device(device_id)
+        if is_active:
+            return True
+
+    # Если ни то, ни другое — доступа нет
+    raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
 # ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/")
@@ -153,7 +163,7 @@ def analyze_file(file_path, selected_fields):
     filtered = [line for line in lines if any(line.strip().startswith(f) for f in selected_fields)]
     return "\n".join(filtered) if filtered else answer
 
-# ================= ЭНДПОЙНТЫ =================
+# ================= ЭНДПОЙНТЫ (защищённые) =================
 
 # --- Создание лицензии (для Tilda) ---
 @app.post("/api/create-order")
@@ -172,15 +182,15 @@ async def create_order(request: Request):
 @app.post("/api/verify-license")
 async def verify_license_endpoint(request: Request):
     try:
-        await verify_license_from_request(request)
+        await check_access(request)
         return {"valid": True}
-    except HTTPException as e:
-        return {"valid": False, "reason": e.detail}
+    except HTTPException:
+        return {"valid": False, "reason": "Unauthorized"}
 
 # --- Анализ текстов (печатных форм) ---
 @app.post("/analyze_texts")
 async def analyze_texts(request: Request, data: dict):
-    await verify_license_from_request(request)
+    await check_access(request)
     tenders_data = data.get("tenders", [])
     if not tenders_data:
         raise HTTPException(400, "Нет данных для анализа")
@@ -193,7 +203,6 @@ async def analyze_texts(request: Request, data: dict):
         ]
     async def analyze_one(tender):
         reg_number = tender.get("regNumber", "")
-        # Проверяем кэш
         cached = await database.get_cached_analysis(reg_number)
         if cached:
             print(f"📦 Кэш для {reg_number} использован")
@@ -203,13 +212,11 @@ async def analyze_texts(request: Request, data: dict):
             return {"url": tender.get("url", ""), "reg_number": reg_number, "error": "Недостаточно текста"}
         start = time.time()
         analysis_result = analyze_tender_text(tender_text, selected_fields)
-        # Сохраняем в кэш
         await database.save_analysis_cache(reg_number, analysis_result)
         print(f"⏱️ DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек")
         return {"url": tender.get("url", ""), "reg_number": reg_number, "analysis": analysis_result}
     tasks = [analyze_one(t) for t in tenders_data]
     results = await asyncio.gather(*tasks)
-    # Формируем DOCX
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
     doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
@@ -283,7 +290,7 @@ def detect_file_type(content: bytes) -> str:
 
 @app.post("/package_files")
 async def package_files(request: Request, files: list[UploadFile] = File(...), analysis_text: str = Form("")):
-    await verify_license_from_request(request)
+    await check_access(request)
     if not files:
         raise HTTPException(400, "Нет файлов")
     tenders = {}
@@ -307,7 +314,6 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
                 original_name = base + '.bin'
         print(f"🔍 Тип: {file_type}, имя: {original_name}")
         tenders.setdefault(tender_id, []).append((original_name, content))
-    # Дедупликация имён внутри каждого тендера
     for tender_id, file_list in tenders.items():
         seen = set()
         new_list = []
@@ -321,7 +327,6 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
             seen.add(new_name)
             new_list.append((new_name, content))
         tenders[tender_id] = new_list
-    # Создаём ZIP
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zf:
         for tender_id, file_list in tenders.items():
@@ -346,8 +351,7 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТЫ ДЛЯ ПРОБНОГО ПЕРИОДА (С БД) =================
-
+# ================= ЭНДПОЙНТЫ ДЛЯ ПРОБНОГО ПЕРИОДА =================
 @app.post("/api/trial/start")
 async def start_trial(data: dict):
     device_id = data.get("device_id")
@@ -364,10 +368,10 @@ async def check_trial(data: dict):
     result = await database.get_trial_status(device_id)
     return result
 
-# ================= ОСТАЛЬНЫЕ ЭНДПОЙНТЫ (опционально) =================
+# ================= ОСТАЛЬНЫЕ ЭНДПОЙНТЫ =================
 @app.post("/search_tenders")
 async def search_tenders(request: Request, data: dict):
-    await verify_license_from_request(request)
+    await check_access(request)
     query = data.get("query", "").strip()
     limit = data.get("limit", MAX_TENDERS)
     if not query:
@@ -416,7 +420,7 @@ async def search_tenders(request: Request, data: dict):
 
 @app.post("/suggest_keywords")
 async def suggest_keywords(request: Request, data: dict):
-    await verify_license_from_request(request)
+    await check_access(request)
     description = data.get("description", "").strip()
     if not description:
         raise HTTPException(400, "Описание не может быть пустым")
@@ -431,7 +435,7 @@ async def suggest_keywords(request: Request, data: dict):
 
 @app.post("/ask_ai")
 async def ask_ai(request: Request, data: dict):
-    await verify_license_from_request(request)
+    await check_access(request)
     question = data.get("question", "").strip()
     if not question:
         raise HTTPException(400, "Введите вопрос")
