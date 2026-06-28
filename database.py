@@ -90,7 +90,7 @@ async def init_db():
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS ip_address TEXT")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS user_agent TEXT")
 
-    print("✅ База данных PostgreSQL инициализирована (с защитой по IP+User-Agent)")
+    print("✅ База данных PostgreSQL инициализирована (без защиты по IP+User-Agent)")
 
 async def create_user(email: str, password: str):
     password = password[:72]
@@ -210,11 +210,10 @@ async def check_and_increment_usage(email):
         )
         return True
 
-# ================= ПРОБНЫЙ ПЕРИОД (ЗАЩИТА ПО IP+USER-AGENT) =================
+# ================= ПРОБНЫЙ ПЕРИОД (ТОЛЬКО ПО DEVICE_ID, БЕЗ IP+USER-AGENT) =================
 async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = None, user_agent: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # 1. Проверяем, есть ли уже запись для этого device_id
         existing = await conn.fetchrow(
             "SELECT start_date FROM device_trials WHERE device_id = $1",
             device_id
@@ -222,16 +221,6 @@ async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = Non
         if existing:
             return {"status": "ok", "trial_start": existing["start_date"]}
 
-        # 2. Если device_id нет — проверяем IP+User-Agent (защита от переустановок)
-        if ip_address and user_agent:
-            row = await conn.fetchrow(
-                "SELECT device_id FROM device_trials WHERE ip_address = $1 AND user_agent = $2",
-                ip_address, user_agent
-            )
-            if row:
-                return {"status": "already_used", "device_id": row["device_id"]}
-
-        # 3. Создаём новую запись
         now = datetime.now()
         await conn.execute(
             "INSERT INTO device_trials (device_id, start_date, trial_days, ip_address, user_agent, total_requests, total_tokens) VALUES ($1, $2, $3, $4, $5, 0, 0)",
