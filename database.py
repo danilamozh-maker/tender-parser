@@ -83,6 +83,7 @@ async def init_db():
             )
         """)
 
+        # Миграция: добавляем колонки, если их нет
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
@@ -92,6 +93,7 @@ async def init_db():
 
     print("✅ База данных PostgreSQL инициализирована (с защитой пробного периода)")
 
+# ================= ПОЛЬЗОВАТЕЛИ =================
 async def create_user(email: str, password: str):
     password = password[:72]
     hashed = sha256_crypt.hash(password)
@@ -113,6 +115,7 @@ def verify_password(plain_password: str, hashed_password: str):
     plain_password = plain_password[:72]
     return sha256_crypt.verify(plain_password, hashed_password)
 
+# ================= ЛИЦЕНЗИИ =================
 def generate_license_key():
     alphabet = string.ascii_uppercase + string.digits
     return '-'.join(''.join(secrets.choice(alphabet) for _ in range(4)) for _ in range(4))
@@ -161,6 +164,7 @@ async def deactivate_license(key):
     async with pool.acquire() as conn:
         await conn.execute("UPDATE licenses SET is_active = FALSE WHERE license_key = $1", key)
 
+# ================= КЭШ АНАЛИЗА =================
 async def get_cached_analysis(reg_number):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -182,6 +186,7 @@ async def clear_cache():
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM analysis_cache")
 
+# ================= ТАРИФИКАЦИЯ =================
 async def get_user_plan_limit(email):
     return 50
 
@@ -210,9 +215,19 @@ async def check_and_increment_usage(email):
         )
         return True
 
+# ================= ПРОБНЫЙ ПЕРИОД (ИСПРАВЛЕННАЯ ЛОГИКА) =================
 async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = None, user_agent: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Сначала проверяем, есть ли уже запись для этого device_id
+        existing = await conn.fetchrow(
+            "SELECT start_date FROM device_trials WHERE device_id = $1",
+            device_id
+        )
+        if existing:
+            return {"status": "ok", "trial_start": existing["start_date"]}
+
+        # Если записи нет — проверяем IP+User-Agent (защита от переустановок)
         if ip_address and user_agent:
             row = await conn.fetchrow(
                 "SELECT device_id FROM device_trials WHERE ip_address = $1 AND user_agent = $2",
@@ -220,9 +235,8 @@ async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = Non
             )
             if row:
                 return {"status": "already_used", "device_id": row["device_id"]}
-        row = await conn.fetchrow("SELECT start_date FROM device_trials WHERE device_id = $1", device_id)
-        if row:
-            return {"status": "ok", "trial_start": row["start_date"]}
+
+        # Создаём новую запись
         now = datetime.now()
         await conn.execute(
             "INSERT INTO device_trials (device_id, start_date, trial_days, ip_address, user_agent, total_requests, total_tokens) VALUES ($1, $2, $3, $4, $5, 0, 0)",
@@ -233,7 +247,10 @@ async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = Non
 async def get_trial_status(device_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT start_date, trial_days FROM device_trials WHERE device_id = $1", device_id)
+        row = await conn.fetchrow(
+            "SELECT start_date, trial_days FROM device_trials WHERE device_id = $1",
+            device_id
+        )
         if not row:
             return {"status": "not_started"}
         start_date = row["start_date"]
@@ -252,6 +269,7 @@ async def check_trial_by_device(device_id: str) -> bool:
     status = await get_trial_status(device_id)
     return status.get("status") == "active"
 
+# ================= СТАТИСТИКА ИСПОЛЬЗОВАНИЯ =================
 async def increment_usage(license_key: str = None, device_id: str = None, tokens_used: int = 0):
     if not license_key and not device_id:
         return
