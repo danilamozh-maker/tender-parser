@@ -49,7 +49,9 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL,
                 is_active BOOLEAN DEFAULT TRUE,
-                activated_at TIMESTAMP
+                activated_at TIMESTAMP,
+                total_requests INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0
             )
         """)
         await conn.execute("""
@@ -74,10 +76,27 @@ async def init_db():
                 device_id TEXT PRIMARY KEY,
                 start_date TIMESTAMP NOT NULL,
                 trial_days INTEGER DEFAULT 2,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_requests INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0
             )
         """)
-    print("✅ База данных PostgreSQL инициализирована")
+
+        # Добавляем колонки, если их нет (миграция)
+        await conn.execute("""
+            ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0
+        """)
+        await conn.execute("""
+            ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0
+        """)
+        await conn.execute("""
+            ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0
+        """)
+        await conn.execute("""
+            ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0
+        """)
+
+    print("✅ База данных PostgreSQL инициализирована (с колонками статистики)")
 
 # ================= ПОЛЬЗОВАТЕЛИ =================
 async def create_user(email: str, password: str):
@@ -116,7 +135,7 @@ async def create_license(email=None, days_valid=30):
     async with pool.acquire() as conn:
         try:
             await conn.execute(
-                "INSERT INTO licenses (license_key, user_email, expires_at, is_active) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO licenses (license_key, user_email, expires_at, is_active, total_requests, total_tokens) VALUES ($1, $2, $3, $4, 0, 0)",
                 license_key, email, expires_at, True
             )
             return license_key
@@ -221,7 +240,7 @@ async def start_trial(device_id: str, trial_days: int = 2):
             return {"status": "ok", "trial_start": row["start_date"]}
         now = datetime.now()
         await conn.execute(
-            "INSERT INTO device_trials (device_id, start_date, trial_days) VALUES ($1, $2, $3)",
+            "INSERT INTO device_trials (device_id, start_date, trial_days, total_requests, total_tokens) VALUES ($1, $2, $3, 0, 0)",
             device_id, now, trial_days
         )
         return {"status": "ok", "trial_start": now}
@@ -247,7 +266,31 @@ async def get_trial_status(device_id: str):
                 "trial_end": (start_date + timedelta(days=trial_days)).isoformat()
             }
 
-# Новая функция: просто проверяет, активен ли пробный период (без деталей)
 async def check_trial_by_device(device_id: str) -> bool:
     status = await get_trial_status(device_id)
     return status.get("status") == "active"
+
+# ================= СТАТИСТИКА ИСПОЛЬЗОВАНИЯ =================
+async def increment_usage(license_key: str = None, device_id: str = None, tokens_used: int = 0):
+    """
+    Увеличивает счётчик запросов и токенов для лицензии или устройства.
+    """
+    if not license_key and not device_id:
+        return
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if license_key:
+            await conn.execute("""
+                UPDATE licenses
+                SET total_requests = total_requests + 1,
+                    total_tokens = total_tokens + $1
+                WHERE license_key = $2
+            """, tokens_used, license_key)
+        elif device_id:
+            await conn.execute("""
+                UPDATE device_trials
+                SET total_requests = total_requests + 1,
+                    total_tokens = total_tokens + $1
+                WHERE device_id = $2
+            """, tokens_used, device_id)
