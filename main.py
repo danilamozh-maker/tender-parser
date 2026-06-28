@@ -78,14 +78,12 @@ async def download_page():
 # ================= ЭНДПОЙНТ ДЛЯ СКАЧИВАНИЯ ФАЙЛОВ =================
 @app.get("/download-file/{filename}")
 async def download_file(filename: str):
-    # Безопасность: разрешаем скачивать только наши файлы
     allowed_files = ["tender-parser-extension.crx", "tender-parser-extension.zip"]
     if filename not in allowed_files:
         raise HTTPException(404, "Файл не найден")
     file_path = os.path.join(os.path.dirname(__file__), filename)
     if not os.path.exists(file_path):
         raise HTTPException(404, "Файл не найден на сервере")
-    # Определяем MIME-тип
     if filename.endswith(".crx"):
         media_type = "application/x-chrome-extension"
     else:
@@ -143,7 +141,8 @@ def read_excel(file_path):
         except Exception as e:
             return f"Ошибка чтения Excel: {e}"
 
-def query_deepseek(prompt):
+# ================= ОСНОВНАЯ ФУНКЦИЯ ЗАПРОСА К DEEPSEEK (СО СТАТИСТИКОЙ) =================
+def query_deepseek(prompt, license_key=None, device_id=None):
     messages = [
         {"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
         {"role": "user", "content": prompt}
@@ -160,6 +159,16 @@ def query_deepseek(prompt):
         response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=60)
         if response.status_code == 200:
             result = response.json()
+            # Получаем количество использованных токенов
+            usage = result.get("usage", {})
+            total_tokens = usage.get("total_tokens", 0)
+            # Обновляем статистику асинхронно (не блокируем ответ)
+            if license_key or device_id:
+                asyncio.create_task(database.increment_usage(
+                    license_key=license_key,
+                    device_id=device_id,
+                    tokens_used=total_tokens
+                ))
             return result["choices"][0]["message"]["content"]
         else:
             return f"Ошибка HTTP {response.status_code}: {response.text}"
@@ -235,6 +244,11 @@ async def analyze_texts(request: Request, data: dict):
             "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
+
+    # Получаем идентификатор для статистики
+    license_key = request.headers.get("X-License-Key")
+    device_id = request.headers.get("X-Device-ID")
+
     async def analyze_one(tender):
         reg_number = tender.get("regNumber", "")
         cached = await database.get_cached_analysis(reg_number)
@@ -245,10 +259,12 @@ async def analyze_texts(request: Request, data: dict):
         if not tender_text or len(tender_text) < 100:
             return {"url": tender.get("url", ""), "reg_number": reg_number, "error": "Недостаточно текста"}
         start = time.time()
-        analysis_result = analyze_tender_text(tender_text, selected_fields)
+        # Передаём license_key и device_id для статистики
+        analysis_result = analyze_tender_text(tender_text, selected_fields, license_key=license_key, device_id=device_id)
         await database.save_analysis_cache(reg_number, analysis_result)
         print(f"⏱️ DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек")
         return {"url": tender.get("url", ""), "reg_number": reg_number, "analysis": analysis_result}
+
     tasks = [analyze_one(t) for t in tenders_data]
     results = await asyncio.gather(*tasks)
     doc = Document()
@@ -278,7 +294,8 @@ async def analyze_texts(request: Request, data: dict):
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-def analyze_tender_text(text, selected_fields):
+# --- Вспомогательная функция анализа текста (передаёт статистику) ---
+def analyze_tender_text(text, selected_fields, license_key=None, device_id=None):
     if not selected_fields:
         selected_fields = [
             "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
@@ -292,7 +309,7 @@ def analyze_tender_text(text, selected_fields):
 Вот текст для анализа:
 {text[:8000]}
 Извлеки данные и напиши в указанном формате."""
-    answer = query_deepseek(prompt)
+    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
     result = {}
     for line in answer.split('\n'):
         if ':' in line:
