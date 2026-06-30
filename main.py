@@ -390,7 +390,7 @@ async def start_trial(request: Request, data: dict):
         raise HTTPException(400, "device_id не указан")
     ip_address = request.client.host
     user_agent = request.headers.get("User-Agent")
-    result = await database.start_trial(device_id, trial_days=2, ip_address=ip_address, user_agent=user_agent)
+    result = await database.start_trial(device_id, trial_days=0, ip_address=ip_address, user_agent=user_agent)
     return result
 
 @app.post("/api/trial/status")
