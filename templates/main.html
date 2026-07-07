@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тендерный парсер</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f0f4f8; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        .card { max-width: 700px; width: 100%; background: white; border-radius: 20px; padding: 40px; box-shadow: 0 20px 60px rgba(0,0,0,0.08); text-align: center; }
+        h1 { font-size: 28px; margin-bottom: 8px; color: #1e293b; }
+        .subtitle { color: #475569; margin-bottom: 30px; font-size: 16px; }
+        .btn { display: inline-block; padding: 14px 28px; border-radius: 10px; font-weight: 600; text-decoration: none; cursor: pointer; border: none; font-size: 16px; transition: 0.2s; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-primary:hover { background: #5a6fd6; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-success:hover { background: #059669; }
+        .btn-outline { background: transparent; border: 2px solid #e2e8f0; color: #1e293b; }
+        .btn-outline:hover { background: #f1f5f9; }
+        .section { margin: 30px 0; padding: 20px 0; border-top: 1px solid #e2e8f0; }
+        .section:first-of-type { border-top: none; }
+        .price { font-size: 24px; font-weight: 700; color: #1e293b; margin: 10px 0; }
+        .offer-link { margin-top: 20px; font-size: 13px; }
+        .offer-link a { color: #667eea; text-decoration: none; }
+        .legal { font-size: 12px; color: #64748b; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 20px; text-align: left; }
+        .legal p { margin: 4px 0; }
+        .hidden { display: none; }
+        .loader { border: 3px solid #e2e8f0; border-top: 3px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 0.8s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .status-msg { margin: 15px 0; font-size: 15px; color: #475569; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+        .install-steps { text-align: left; margin: 20px 0; padding-left: 20px; color: #475569; }
+        .install-steps li { margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>📦 Тендерный парсер</h1>
+    <p class="subtitle">Автоматический сбор и анализ тендеров с zakupki.gov.ru</p>
+
+    <!-- Скачивание расширения -->
+    <div class="section">
+        <h2 style="font-size: 18px; margin-bottom: 12px;">⬇️ Скачать расширение</h2>
+        <p style="color: #475569; font-size: 14px; margin-bottom: 16px;">
+            Файл <strong>.crx</strong> — установка в один клик в Яндекс Браузере.
+        </p>
+        <a href="/download-file/tender-parser-extension.crx" download class="btn btn-primary" style="width: 100%;">
+            📥 Скачать расширение (.crx)
+        </a>
+        <details style="margin-top: 12px; font-size: 13px; color: #64748b; text-align: left;">
+            <summary>📖 Как установить в Яндекс Браузере</summary>
+            <ol class="install-steps">
+                <li>Скачайте файл <code>tender-parser-extension.crx</code>.</li>
+                <li>Откройте Яндекс Браузер и перейдите на страницу <code>browser://extensions/</code>.</li>
+                <li>Включите <strong>«Режим разработчика»</strong> (переключатель в правом верхнем углу).</li>
+                <li>Перетащите скачанный файл <code>.crx</code> в окно браузера.</li>
+                <li>Нажмите <strong>«Установить расширение»</strong> в появившемся диалоге.</li>
+                <li>Готово! Расширение появится в панели браузера.</li>
+            </ol>
+        </details>
+        <p style="margin-top: 10px; font-size: 13px; color: #94a3b8;">
+            <em>Для Chrome процесс аналогичный (страница <code>chrome://extensions/</code>).</em>
+        </p>
+    </div>
+
+    <!-- Покупка лицензии -->
+    <div class="section">
+        <h2 style="font-size: 18px; margin-bottom: 12px;">💳 Купить лицензию</h2>
+        <p style="color: #475569; font-size: 14px; margin-bottom: 8px;">Стоимость подписки:</p>
+        <div class="price">2 500 ₽ / месяц</div>
+        <p style="color: #475569; font-size: 13px; margin-bottom: 16px;">Оплата через Робокассу (СБП, карты)</p>
+        <button id="payBtn" class="btn btn-success" style="width: 100%;">💳 Оплатить 2 500 ₽</button>
+        <div id="loading" class="loader hidden"></div>
+        <div id="statusMessage" class="status-msg"></div>
+        <div style="margin-top: 15px; font-size: 13px;">
+            <a href="/offer" target="_blank" style="color: #667eea; text-decoration: none;">📄 Публичная оферта</a>
+            &nbsp;|&nbsp;
+            <a href="/contacts" style="color: #667eea; text-decoration: none;">📞 Контакты</a>
+        </div>
+    </div>
+
+    <!-- Юридическая информация (кратко) -->
+    <div class="legal">
+        <p><strong>ООО «ТендерПарсер»</strong></p>
+        <p>ИНН: 1234567890 | ОГРН: 1234567890123</p>
+        <p>Телефон: +7 (999) 123-45-67 | E-mail: info@tender-parser.ru</p>
+        <p style="margin-top: 5px;">Юридический адрес: г. Москва, ул. Примерная, д. 1</p>
+        <p style="margin-top: 5px; font-size: 11px; color: #94a3b8;">Полные реквизиты на странице <a href="/contacts" style="color: #667eea;">«Контакты»</a></p>
+    </div>
+</div>
+
+<script>
+    document.getElementById('payBtn').addEventListener('click', async function() {
+        const btn = this;
+        const loading = document.getElementById('loading');
+        const statusMsg = document.getElementById('statusMessage');
+        btn.disabled = true;
+        loading.classList.remove('hidden');
+        statusMsg.textContent = '⏳ Создание платежа...';
+
+        try {
+            const response = await fetch('/api/create-payment');
+            const data = await response.json();
+            const url = new URL('https://auth.robokassa.ru/Merchant/Index.aspx');
+            url.searchParams.append('MerchantLogin', data.merchant_login);
+            url.searchParams.append('OutSum', data.out_sum);
+            url.searchParams.append('InvId', data.inv_id);
+            url.searchParams.append('SignatureValue', data.signature);
+            url.searchParams.append('Description', data.description);
+            url.searchParams.append('Culture', data.culture);
+            // Перенаправляем на оплату
+            window.location.href = url.toString();
+        } catch (err) {
+            statusMsg.textContent = '❌ Ошибка создания платежа: ' + err.message;
+            loading.classList.add('hidden');
+            btn.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>
