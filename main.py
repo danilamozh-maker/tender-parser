@@ -25,13 +25,13 @@ app = FastAPI()
 OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
 API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # замени на свой
 MODEL_NAME = "deepseek-chat"
-MAX_TENDERS = 15
+MAX_TENDERS = 50
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
-MERCHANT_LOGIN = "твой_логин_из_личного_кабинета" # замени
-PASSWORD_1 = "твой_пароль_1" # замени
-PASSWORD_2 = "твой_пароль_2" # замени
+MERCHANT_LOGIN = "tender_parser_CSB" # замени
+PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
+PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
 # ============================================
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
