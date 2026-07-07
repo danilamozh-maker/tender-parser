@@ -80,12 +80,12 @@
         </div>
     </div>
 
-    <!-- Юридическая информация (кратко) -->
+    <!-- Юридическая информация (кратко) с реальными данными -->
     <div class="legal">
-        <p><strong>ООО «ТендерПарсер»</strong></p>
-        <p>ИНН: 1234567890 | ОГРН: 1234567890123</p>
-        <p>Телефон: +7 (999) 123-45-67 | E-mail: info@tender-parser.ru</p>
-        <p style="margin-top: 5px;">Юридический адрес: г. Москва, ул. Примерная, д. 1</p>
+        <p><strong>ООО «ЦСБИЗНЕС»</strong></p>
+        <p>ИНН: 9729413771 | ОГРН: 1257700582171</p>
+        <p>Телефон: +7 915 085 57 70 | E-mail: <a href="mailto:it_manager@csb24.ru" style="color: #667eea;">it_manager@csb24.ru</a></p>
+        <p style="margin-top: 5px;">Юридический адрес: 119027, г. Москва, Интернациональная ул., д. 2, кв. 165</p>
         <p style="margin-top: 5px; font-size: 11px; color: #94a3b8;">Полные реквизиты на странице <a href="/contacts" style="color: #667eea;">«Контакты»</a></p>
     </div>
 </div>
@@ -109,7 +109,6 @@
             url.searchParams.append('SignatureValue', data.signature);
             url.searchParams.append('Description', data.description);
             url.searchParams.append('Culture', data.culture);
-            // Перенаправляем на оплату
             window.location.href = url.toString();
         } catch (err) {
             statusMsg.textContent = '❌ Ошибка создания платежа: ' + err.message;
