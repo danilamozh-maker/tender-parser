@@ -2,14 +2,21 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Тендерный парсер</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f0f4f8; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-        .card { max-width: 700px; width: 100%; background: white; border-radius: 20px; padding: 40px; box-shadow: 0 20px 60px rgba(0,0,0,0.08); text-align: center; }
-        h1 { font-size: 28px; margin-bottom: 8px; color: #1e293b; }
-        .subtitle { color: #475569; margin-bottom: 30px; font-size: 16px; }
+        .card { max-width: 750px; width: 100%; background: white; border-radius: 20px; padding: 40px; box-shadow: 0 20px 60px rgba(0,0,0,0.08); }
+        h1 { font-size: 32px; margin-bottom: 8px; color: #1e293b; text-align: center; }
+        .badge { display: inline-block; background: #10b981; color: white; font-size: 12px; padding: 4px 12px; border-radius: 20px; margin-bottom: 12px; }
+        .features { margin: 25px 0; padding: 0; list-style: none; }
+        .features li { padding: 10px 0; border-bottom: 1px solid #f1f5f9; display: flex; align-items: flex-start; gap: 12px; color: #334155; font-size: 15px; }
+        .features li:last-child { border-bottom: none; }
+        .features li .icon { font-size: 20px; min-width: 28px; text-align: center; }
+        .features li strong { color: #0f172a; }
+        .feature-highlight { background: #f0fdf4; padding: 12px 16px; border-radius: 10px; border-left: 4px solid #10b981; margin: 12px 0; }
         .btn { display: inline-block; padding: 14px 28px; border-radius: 10px; font-weight: 600; text-decoration: none; cursor: pointer; border: none; font-size: 16px; transition: 0.2s; }
         .btn-primary { background: #667eea; color: white; }
         .btn-primary:hover { background: #5a6fd6; }
@@ -17,11 +24,10 @@
         .btn-success:hover { background: #059669; }
         .btn-outline { background: transparent; border: 2px solid #e2e8f0; color: #1e293b; }
         .btn-outline:hover { background: #f1f5f9; }
-        .section { margin: 30px 0; padding: 20px 0; border-top: 1px solid #e2e8f0; }
+        .section { margin: 30px 0; padding: 25px 0; border-top: 1px solid #e2e8f0; }
         .section:first-of-type { border-top: none; }
-        .price { font-size: 24px; font-weight: 700; color: #1e293b; margin: 10px 0; }
-        .offer-link { margin-top: 20px; font-size: 13px; }
-        .offer-link a { color: #667eea; text-decoration: none; }
+        .price { font-size: 28px; font-weight: 700; color: #1e293b; margin: 10px 0; }
+        .sub-price { color: #475569; font-size: 14px; }
         .legal { font-size: 12px; color: #64748b; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 20px; text-align: left; }
         .legal p { margin: 4px 0; }
         .hidden { display: none; }
@@ -30,18 +36,56 @@
         .status-msg { margin: 15px 0; font-size: 15px; color: #475569; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
-        .install-steps { text-align: left; margin: 20px 0; padding-left: 20px; color: #475569; }
+        .install-steps { text-align: left; margin: 15px 0; padding-left: 20px; color: #475569; }
         .install-steps li { margin-bottom: 8px; }
+        .subtitle { color: #475569; text-align: center; font-size: 16px; margin-bottom: 10px; }
+        .section-title { font-size: 20px; font-weight: 600; color: #1e293b; margin-bottom: 16px; }
+        .coming-soon { background: #fef9c3; color: #854d0e; font-size: 12px; padding: 2px 10px; border-radius: 12px; display: inline-block; margin-left: 8px; }
     </style>
 </head>
 <body>
 <div class="card">
     <h1>📦 Тендерный парсер</h1>
-    <p class="subtitle">Автоматический сбор и анализ тендеров с zakupki.gov.ru</p>
+    <p class="subtitle">Автоматический сбор и анализ тендеров с zakupki.gov.ru с использованием искусственного интеллекта</p>
+    <div style="text-align: center; margin-bottom: 10px;">
+        <span class="badge">🚀 Доступно для Яндекс Браузера</span>
+    </div>
+
+    <!-- Описание функционала -->
+    <ul class="features">
+        <li>
+            <span class="icon">📊</span>
+            <div><strong>Массовый анализ до 50 тендеров одновременно</strong><br>За один клик собирайте все тендеры со страницы и получайте структурированный анализ по каждому из них.</div>
+        </li>
+        <li>
+            <span class="icon">🤖</span>
+            <div><strong>Интеллектуальный анализ через ИИ</strong><br>Нейросеть DeepSeek извлекает ключевые параметры: НМЦ, сроки, обеспечение, аванс, контакты, требования и многое другое.</div>
+        </li>
+        <li>
+            <span class="icon">📄</span>
+            <div><strong>Скачивание всех документов по тендеру</strong><br>Все прикреплённые файлы (PDF, DOCX, XLSX, RAR, ZIP) автоматически собираются и упаковываются в ZIP-архив.</div>
+        </li>
+        <li>
+            <span class="icon">🎯</span>
+            <div><strong>Анализ текущего тендера</strong><br>Находясь на странице конкретного тендера, вы можете проанализировать его отдельно без сбора всей страницы.</div>
+        </li>
+        <li>
+            <span class="icon">📈</span>
+            <div><strong>Готовые отчёты в формате DOCX</strong><br>Все результаты анализа сохраняются в удобный Word-документ с разбивкой по тендерам.</div>
+        </li>
+        <li>
+            <span class="icon">📱</span>
+            <div><strong>Поддержка 44-ФЗ и 223-ФЗ</strong><br>Расширение работает с обоими типами закупок, автоматически определяя формат и подстраиваясь под него.</div>
+        </li>
+        <li>
+            <span class="icon">🔜</span>
+            <div><strong>Банковские гарантии</strong> <span class="coming-soon">Скоро</span><br>Автоматическая отправка запросов на получение банковской гарантии прямо из расширения. Функция находится в разработке и будет доступна в ближайшее время.</div>
+        </li>
+    </ul>
 
     <!-- Скачивание расширения -->
     <div class="section">
-        <h2 style="font-size: 18px; margin-bottom: 12px;">⬇️ Скачать расширение</h2>
+        <h2 class="section-title">⬇️ Скачать расширение</h2>
         <p style="color: #475569; font-size: 14px; margin-bottom: 16px;">
             Файл <strong>.crx</strong> — установка в один клик в Яндекс Браузере.
         </p>
@@ -59,14 +103,12 @@
                 <li>Готово! Расширение появится в панели браузера.</li>
             </ol>
         </details>
-        <p style="margin-top: 10px; font-size: 13px; color: #94a3b8;">
-            <em>Для Chrome процесс аналогичный (страница <code>chrome://extensions/</code>).</em>
-        </p>
+        <!-- Убрано упоминание Google Chrome -->
     </div>
 
     <!-- Покупка лицензии -->
     <div class="section">
-        <h2 style="font-size: 18px; margin-bottom: 12px;">💳 Купить лицензию</h2>
+        <h2 class="section-title">💳 Купить лицензию</h2>
         <p style="color: #475569; font-size: 14px; margin-bottom: 8px;">Стоимость подписки:</p>
         <div class="price">2 500 ₽ / месяц</div>
         <p style="color: #475569; font-size: 13px; margin-bottom: 16px;">Оплата через Робокассу (СБП, карты)</p>
@@ -80,7 +122,7 @@
         </div>
     </div>
 
-    <!-- Юридическая информация (кратко) с реальными данными -->
+    <!-- Юридическая информация (кратко) -->
     <div class="legal">
         <p><strong>ООО «ЦСБИЗНЕС»</strong></p>
         <p>ИНН: 9729413771 | ОГРН: 1257700582171</p>
