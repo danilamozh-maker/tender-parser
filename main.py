@@ -5,6 +5,7 @@ import io
 import json
 import time
 import asyncio
+import hashlib
 from pathlib import Path
 from datetime import datetime
 from docx import Document
@@ -20,12 +21,20 @@ import parser
 
 app = FastAPI()
 
+# ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
-API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56"
+API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # замени на свой
 MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
+# ================= НАСТРОЙКИ РОБОКАССЫ =================
+MERCHANT_LOGIN = "твой_логин_из_личного_кабинета" # замени
+PASSWORD_1 = "твой_пароль_1" # замени
+PASSWORD_2 = "твой_пароль_2" # замени
+# ============================================
+
+# ================= ИНИЦИАЛИЗАЦИЯ БД =================
 @app.on_event("startup")
 async def startup():
     try:
@@ -34,6 +43,7 @@ async def startup():
     except Exception as e:
         print(f"❌ Ошибка инициализации БД: {e}")
 
+# ================= ПРОВЕРКА ДОСТУПА =================
 async def check_access(request: Request):
     license_key = request.headers.get("X-License-Key")
     if license_key:
@@ -47,19 +57,44 @@ async def check_access(request: Request):
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
-@app.get("/")
-async def root():
-    return {"status": "ok", "message": "Tender Parser API is running"}
-
+# ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-@app.get("/download", response_class=HTMLResponse)
-async def download_page():
-    with open("templates/download.html", "r", encoding="utf-8") as f:
+# ================= СТРАНИЦЫ САЙТА =================
+
+# --- Главная страница ---
+@app.get("/", response_class=HTMLResponse)
+async def main_page():
+    with open("templates/main.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
+# --- Страница контактов ---
+@app.get("/contacts", response_class=HTMLResponse)
+async def contacts_page():
+    with open("templates/contacts.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+# --- Страница оферты ---
+@app.get("/offer", response_class=HTMLResponse)
+async def offer_page():
+    with open("templates/offer.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+# --- Скачивание оферты (файл .docx) ---
+@app.get("/oferta")
+async def download_oferta():
+    file_path = os.path.join("static", "oferta.docx")
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "Файл оферты не найден")
+    return FileResponse(
+        file_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename="oferta.docx"
+    )
+
+# --- Скачивание расширения (.crx и .zip) ---
 @app.get("/download-file/{filename}")
 async def download_file(filename: str):
     allowed_files = ["tender-parser-extension.crx", "tender-parser-extension.zip"]
@@ -74,6 +109,76 @@ async def download_file(filename: str):
         media_type = "application/zip"
     return FileResponse(file_path, media_type=media_type, filename=filename)
 
+# --- Редирект со старого /download на главную ---
+@app.get("/download")
+async def download_redirect():
+    return RedirectResponse(url="/", status_code=302)
+
+# ================= ЭНДПОЙНТЫ РОБОКАССЫ =================
+@app.post("/api/create-payment")
+async def create_payment():
+    inv_id = int(datetime.now().timestamp())
+    amount = 2500 # цена в рублях
+
+    signature = hashlib.md5(
+        f"{MERCHANT_LOGIN}:{amount}:{inv_id}:{PASSWORD_1}".encode()
+    ).hexdigest()
+
+    # Здесь можно сохранить заказ в БД со статусом pending
+    # ...
+
+    return {
+        "merchant_login": MERCHANT_LOGIN,
+        "out_sum": amount,
+        "inv_id": inv_id,
+        "signature": signature,
+        "description": "Лицензия для Тендерного парсера",
+        "culture": "ru"
+    }
+
+@app.post("/robokassa/result")
+async def robokassa_result(request: Request):
+    form = await request.form()
+    data = dict(form)
+
+    out_sum = data.get("OutSum")
+    inv_id = data.get("InvId")
+    signature = data.get("SignatureValue")
+
+    expected = hashlib.md5(
+        f"{out_sum}:{inv_id}:{PASSWORD_2}".encode()
+    ).hexdigest()
+
+    if signature.lower() != expected.lower():
+        raise HTTPException(400, "Invalid signature")
+
+    # Обновляем статус заказа в БД и создаём лицензию
+    # Например:
+    # license_key = await database.create_license(days_valid=30)
+    # сохраняем в таблицу orders или licenses
+
+    return f"OK{inv_id}"
+
+@app.get("/robokassa/success")
+async def robokassa_success(request: Request):
+    inv_id = request.query_params.get("InvId")
+    # Находим заказ в БД и получаем лицензионный ключ
+    # Для примера покажем заглушку
+    license_key = "XXXX-YYYY-ZZZZ-WWWW"
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><title>Оплата успешна</title></head>
+    <body style="font-family: Arial; text-align: center; padding: 40px;">
+        <h1>✅ Оплата прошла успешно!</h1>
+        <p>Ваш лицензионный ключ: <strong>{license_key}</strong></p>
+        <p>Скопируйте его и вставьте в расширение.</p>
+        <a href="/">На главную</a>
+    </body>
+    </html>
+    """)
+
+# ================= ЭНДПОЙНТ ДЛЯ ГЕНЕРАЦИИ ЛИЦЕНЗИИ (через админ-токен) =================
 @app.post("/api/create-order")
 async def create_order(request: Request):
     admin_token = request.headers.get("X-Admin-Token")
@@ -86,6 +191,7 @@ async def create_order(request: Request):
     expires_at = result.get("expires_at") if result and result.get("valid") else None
     return {"status": "success", "license_key": license_key, "expires_at": expires_at}
 
+# ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
 def read_docx(file_path):
     try:
         doc = Document(file_path)
@@ -138,7 +244,6 @@ def query_deepseek(prompt, license_key=None, device_id=None):
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     try:
         response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=60)
-        # Считаем запрос даже при ошибке 402 (и других ошибках)
         total_tokens = 0
         if response.status_code == 200:
             result = response.json()
@@ -147,7 +252,6 @@ def query_deepseek(prompt, license_key=None, device_id=None):
             answer = result["choices"][0]["message"]["content"]
         else:
             answer = f"Ошибка HTTP {response.status_code}: {response.text}"
-        # Обновляем статистику даже при ошибке (для 402 тоже)
         if license_key or device_id:
             asyncio.create_task(database.increment_usage(
                 license_key=license_key,
@@ -157,7 +261,6 @@ def query_deepseek(prompt, license_key=None, device_id=None):
         return answer
     except Exception as e:
         error_msg = f"❌ Ошибка: {e}"
-        # Обновляем статистику и для исключений (считаем как 0 токенов, но запрос учитываем)
         if license_key or device_id:
             asyncio.create_task(database.increment_usage(
                 license_key=license_key,
@@ -198,6 +301,8 @@ def analyze_file(file_path, selected_fields):
     lines = answer.split('\n')
     filtered = [line for line in lines if any(line.strip().startswith(f) for f in selected_fields)]
     return "\n".join(filtered) if filtered else answer
+
+# ================= ЭНДПОЙНТЫ (защищённые) =================
 
 @app.post("/api/verify-license")
 async def verify_license_endpoint(request: Request):
@@ -383,6 +488,7 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
+# ================= ЭНДПОЙНТЫ ДЛЯ ПРОБНОГО ПЕРИОДА =================
 @app.post("/api/trial/start")
 async def start_trial(request: Request, data: dict):
     device_id = data.get("device_id")
@@ -401,6 +507,7 @@ async def check_trial(data: dict):
     result = await database.get_trial_status(device_id)
     return result
 
+# ================= ОСТАЛЬНЫЕ ЭНДПОЙНТЫ =================
 @app.post("/search_tenders")
 async def search_tenders(request: Request, data: dict):
     await check_access(request)
@@ -477,6 +584,7 @@ async def ask_ai(request: Request, data: dict):
     answer = query_deepseek(prompt)
     return {"answer": answer}
 
+# ================= ЗАПУСК =================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
