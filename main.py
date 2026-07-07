@@ -81,6 +81,13 @@ async def contacts_page():
 async def offer_page():
     with open("templates/offer.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
+        
+@app.get("/updates.xml")
+async def updates_xml():
+    file_path = os.path.join(os.path.dirname(__file__), "updates.xml")
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "Файл updates.xml не найден")
+    return FileResponse(file_path, media_type="application/xml")
 
 # --- Скачивание оферты (файл .docx) ---
 @app.get("/oferta")
