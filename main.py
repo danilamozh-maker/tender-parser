@@ -658,7 +658,6 @@ async def guarantee_page(request: Request):
                 <label>Ваше имя</label>
                 <input type="text" name="clientName" placeholder="Иванов Иван Иванович" required>
             </div>
-            <!-- НОВОЕ ПОЛЕ: ИНН -->
             <div class="field">
                 <label>ИНН компании</label>
                 <input type="text" name="inn" placeholder="1234567890" required pattern="[0-9]{{10,12}}">
@@ -676,14 +675,14 @@ async def guarantee_page(request: Request):
                 <span>Не звонить мне, связываться только по email</span>
             </div>
 
-            <!-- БЛОК СОГЛАСИЙ -->
+            <!-- БЛОК СОГЛАСИЙ (ИСПРАВЛЕНО: добавлены name) -->
             <div class="consent-block">
                 <label>
-                    <input type="checkbox" id="consent_personal" required>
+                    <input type="checkbox" id="consent_personal" name="consent_personal" required>
                     Я даю согласие на обработку моих персональных данных в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных»
                 </label>
                 <label>
-                    <input type="checkbox" id="consent_terms" required>
+                    <input type="checkbox" id="consent_terms" name="consent_terms" required>
                     Я принимаю условия пользовательского соглашения и политики конфиденциальности
                 </label>
             </div>
@@ -726,7 +725,7 @@ async def guarantee_request(
     contractSecurity: str = Form(""),
     guaranteeType: str = Form(...),
     clientName: str = Form(...),
-    inn: str = Form(...), # новое поле
+    inn: str = Form(...),
     phone: str = Form(...),
     email: str = Form(...),
     contact_by_email: bool = Form(False),
