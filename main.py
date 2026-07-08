@@ -83,7 +83,7 @@ async def send_max_notification(reg_number: str, client_name: str, phone: str, e
     )
 
     headers = {
-        "Authorization": f"Bearer {MAX_BOT_TOKEN}",
+        "Authorization": MAX_BOT_TOKEN,
         "Content-Type": "application/json"
     }
     payload = {
