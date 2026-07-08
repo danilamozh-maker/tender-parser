@@ -30,6 +30,7 @@ MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
+
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
 MERCHANT_LOGIN = "tender_parser_CSB" # замени
 PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
@@ -65,9 +66,22 @@ async def check_access(request: Request):
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
-# ================= ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЯ В MAX =================
-async def send_max_notification(reg_number: str, client_name: str, phone: str, email: str):
-    """Отправляет уведомление о новой заявке в мессенджер MAX."""
+# ================= ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЯ В MAX (ВСЕ ПОЛЯ) =================
+async def send_max_notification(
+    reg_number: str,
+    client_name: str,
+    inn: str,
+    phone: str,
+    email: str,
+    nmc: str,
+    end_date: str,
+    bid_end_date: str,
+    bid_security: str,
+    contract_security: str,
+    guarantee_type: str,
+    contact_by_email: bool
+):
+    """Отправляет полное уведомление о новой заявке в мессенджер MAX."""
     if not MAX_BOT_TOKEN or not MAX_CHAT_ID:
         print("⚠️ MAX Bot не настроен: пропуск уведомления")
         return
@@ -76,22 +90,25 @@ async def send_max_notification(reg_number: str, client_name: str, phone: str, e
         f"📩 **Новая заявка на банковскую гарантию!**\n\n"
         f"🔹 **Номер тендера:** {reg_number}\n"
         f"👤 **Клиент:** {client_name}\n"
+        f"🏢 **ИНН:** {inn or 'Не указан'}\n"
         f"📞 **Телефон:** {phone}\n"
         f"✉️ **Email:** {email}\n"
-        f"🕐 **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        f"💰 **Начальная цена (НМЦ):** {nmc or 'Не указана'}\n"
+        f"📅 **Дата окончания контракта:** {end_date or 'Не указана'}\n"
+        f"📅 **Дата окончания подачи заявок:** {bid_end_date or 'Не указана'}\n"
+        f"🔒 **Обеспечение заявки:** {bid_security or 'Не указано'}\n"
+        f"🔒 **Обеспечение контракта:** {contract_security or 'Не указано'}\n"
+        f"📋 **Тип гарантии:** {'Обеспечение заявки (участие)' if guarantee_type == 'participation' else 'Обеспечение исполнения контракта'}\n"
+        f"📧 **Связь только по email:** {'Да' if contact_by_email else 'Нет (звонить)'}\n"
+        f"🕐 **Время заявки:** {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
 
-    # chat_id передаётся как параметр URL
     url = f"{MAX_API_URL}?chat_id={MAX_CHAT_ID}"
-
     headers = {
-        "Authorization": MAX_BOT_TOKEN, # без префикса Bearer
+        "Authorization": MAX_BOT_TOKEN,
         "Content-Type": "application/json"
     }
-
-    payload = {
-        "text": text
-    }
+    payload = {"text": text}
 
     try:
         async with httpx.AsyncClient(verify=False) as client:
@@ -518,41 +535,35 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКСТА ДЛЯ ГАРАНТИИ (ПРИНИМАЕТ ТЕКСТ ИЗ РАСШИРЕНИЯ) =================
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКСТА ДЛЯ ГАРАНТИИ =================
 @app.post("/api/guarantee/analyze")
 async def guarantee_analyze(request: Request, data: dict):
     await check_access(request)
-    
     reg_number = data.get("regNumber")
     text = data.get("text", "")
     selected_fields = data.get("fields", [])
-    
     if not reg_number or not text or len(text) < 100:
         raise HTTPException(400, "Недостаточно данных для анализа")
-    
     if not selected_fields:
         selected_fields = [
             "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
             "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
-    
     analysis_result = analyze_tender_text(text, selected_fields)
     await database.save_analysis_cache(reg_number, analysis_result)
     print(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш (запрос из гарантии)")
-    
     return {"status": "ok", "reg_number": reg_number}
 
-# ================= ЭНДПОЙНТ ДЛЯ СТРАНИЦЫ ГАРАНТИИ (только показ формы) =================
+# ================= ЭНДПОЙНТ ДЛЯ СТРАНИЦЫ ГАРАНТИИ (С ИНН И ЧЕКБОКСАМИ) =================
 @app.get("/guarantee", response_class=HTMLResponse)
 async def guarantee_page(request: Request):
     reg_number = request.query_params.get("regNumber")
     if not reg_number:
         return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
-    
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
-    
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -565,8 +576,8 @@ async def guarantee_page(request: Request):
             input, select {{ width: 100%; padding: 6px; margin-top: 2px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }}
             .btn {{ background: #f59e0b; color: white; border: none; padding: 10px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 16px; }}
             .btn:hover {{ background: #d97706; }}
+            .btn:disabled {{ background: #ccc; cursor: not-allowed; }}
             .field {{ margin-bottom: 12px; }}
-            .info {{ color: #666; font-size: 14px; margin-top: 10px; }}
             .inline-label {{
                 display: flex;
                 align-items: center;
@@ -584,6 +595,25 @@ async def guarantee_page(request: Request):
             .inline-label span {{
                 font-size: 13px;
                 color: #1e293b;
+            }}
+            .consent-block {{
+                margin-top: 10px;
+                border-top: 1px solid #e2e8f0;
+                padding-top: 12px;
+            }}
+            .consent-block label {{
+                font-weight: normal;
+                font-size: 13px;
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                margin-top: 6px;
+            }}
+            .consent-block input[type="checkbox"] {{
+                width: 16px;
+                height: 16px;
+                margin-top: 2px;
+                flex-shrink: 0;
             }}
         </style>
     </head>
@@ -628,6 +658,11 @@ async def guarantee_page(request: Request):
                 <label>Ваше имя</label>
                 <input type="text" name="clientName" placeholder="Иванов Иван Иванович" required>
             </div>
+            <!-- НОВОЕ ПОЛЕ: ИНН -->
+            <div class="field">
+                <label>ИНН компании</label>
+                <input type="text" name="inn" placeholder="1234567890" required pattern="[0-9]{{10,12}}">
+            </div>
             <div class="field">
                 <label>Телефон</label>
                 <input type="tel" name="phone" placeholder="+7 (999) 123-45-67" required>
@@ -640,16 +675,47 @@ async def guarantee_page(request: Request):
                 <input type="checkbox" name="contact_by_email" value="true">
                 <span>Не звонить мне, связываться только по email</span>
             </div>
-            <button type="submit" class="btn">Отправить заявку</button>
+
+            <!-- БЛОК СОГЛАСИЙ -->
+            <div class="consent-block">
+                <label>
+                    <input type="checkbox" id="consent_personal" required>
+                    Я даю согласие на обработку моих персональных данных в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных»
+                </label>
+                <label>
+                    <input type="checkbox" id="consent_terms" required>
+                    Я принимаю условия пользовательского соглашения и политики конфиденциальности
+                </label>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn" disabled>Отправить заявку</button>
         </form>
         <div style="margin-top: 20px; font-size: 13px; color: #666;">
             <a href="/">На главную</a>
         </div>
+
+        <script>
+            const consentPersonal = document.getElementById('consent_personal');
+            const consentTerms = document.getElementById('consent_terms');
+            const submitBtn = document.getElementById('submitBtn');
+
+            function checkConsents() {{
+                if (consentPersonal.checked && consentTerms.checked) {{
+                    submitBtn.disabled = false;
+                }} else {{
+                    submitBtn.disabled = true;
+                }}
+            }}
+
+            consentPersonal.addEventListener('change', checkConsents);
+            consentTerms.addEventListener('change', checkConsents);
+        </script>
     </body>
     </html>
     """
     return HTMLResponse(content=html)
 
+# ================= ЭНДПОЙНТ ПРИЁМА ЗАЯВКИ (С ИНН И СОГЛАСИЯМИ) =================
 @app.post("/api/guarantee/request")
 async def guarantee_request(
     regNumber: str = Form(...),
@@ -660,29 +726,50 @@ async def guarantee_request(
     contractSecurity: str = Form(""),
     guaranteeType: str = Form(...),
     clientName: str = Form(...),
+    inn: str = Form(...), # новое поле
     phone: str = Form(...),
     email: str = Form(...),
-    contact_by_email: bool = Form(False)
+    contact_by_email: bool = Form(False),
+    consent_personal: bool = Form(False),
+    consent_terms: bool = Form(False)
 ):
+    # Проверка согласий
+    if not consent_personal or not consent_terms:
+        raise HTTPException(400, "Необходимо дать согласие на обработку персональных данных и принять условия")
+
     try:
-        conn = await database.get_pool()
-        async with conn.acquire() as conn:
+        pool = await database.get_pool()
+        async with pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO guarantee_requests 
                 (reg_number, nmc, end_date, bid_end_date, guarantee_type, 
-                 client_name, phone, email, contact_by_email)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 client_name, inn, phone, email, bid_security, contract_security, contact_by_email)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             """, regNumber, nmc, endDate, bidEndDate, guaranteeType,
-                clientName, phone, email, contact_by_email)
+                clientName, inn, phone, email, bidSecurity, contractSecurity, contact_by_email)
         print(f"✅ Заявка для тендера {regNumber} сохранена в БД")
 
-        # ===== ОТПРАВКА УВЕДОМЛЕНИЯ В MAX (фоновая задача) =====
+        # ===== ОТПРАВКА УВЕДОМЛЕНИЯ В MAX (ВСЕ ПОЛЯ) =====
         asyncio.create_task(
-            send_max_notification(regNumber, clientName, phone, email)
+            send_max_notification(
+                reg_number=regNumber,
+                client_name=clientName,
+                inn=inn,
+                phone=phone,
+                email=email,
+                nmc=nmc,
+                end_date=endDate,
+                bid_end_date=bidEndDate,
+                bid_security=bidSecurity,
+                contract_security=contractSecurity,
+                guarantee_type=guaranteeType,
+                contact_by_email=contact_by_email
+            )
         )
 
     except Exception as e:
         print(f"❌ Ошибка сохранения в БД: {e}")
+        raise HTTPException(500, "Ошибка при сохранении заявки")
 
     return HTMLResponse("""
     <!DOCTYPE html>
