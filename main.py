@@ -24,7 +24,7 @@ app = FastAPI()
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
-API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # замени на свой
+API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56"
 MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
@@ -35,6 +35,7 @@ MERCHANT_LOGIN = "tender_parser_CSB" # замени
 PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
 PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
 # ============================================
+
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
 @app.on_event("startup")
@@ -61,16 +62,12 @@ async def check_access(request: Request):
 
 # ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ =================
 def fetch_tender_text_from_server(reg_number: str, type: str = "44") -> str:
-    """
-    Загружает печатную форму тендера с zakupki.gov.ru и извлекает текст.
-    """
     if type == "44":
         url = f"https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber={reg_number}"
     elif type == "223":
         url = f"https://zakupki.gov.ru/epz/order/notice/notice223/printForm/view.html?regNumber={reg_number}"
     else:
         return ""
-    
     try:
         response = requests.get(url, timeout=30)
         response.raise_for_status()
@@ -170,7 +167,6 @@ async def robokassa_result(request: Request):
     expected = hashlib.md5(f"{out_sum}:{inv_id}:{PASSWORD_2}".encode()).hexdigest()
     if signature.lower() != expected.lower():
         raise HTTPException(400, "Invalid signature")
-    # Здесь нужно создать лицензию и сохранить в БД
     return f"OK{inv_id}"
 
 @app.get("/robokassa/success")
@@ -509,31 +505,12 @@ async def guarantee_page(request: Request):
     if not reg_number:
         return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
     
-    # Пытаемся получить данные из кэша
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
     
-    # Если кэша нет — выполняем анализ (даже если он упадёт, форма всё равно откроется)
     if not cached:
-        print(f"🔍 Кэш для {reg_number} не найден, выполняем анализ...")
-        try:
-            text = fetch_tender_text_from_server(reg_number)
-            if text and len(text) > 100:
-                selected_fields = [
-                    "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
-                    "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
-                    "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
-                ]
-                analysis_result = analyze_tender_text(text, selected_fields)
-                await database.save_analysis_cache(reg_number, analysis_result)
-                data = analysis_result
-                print(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш")
-            else:
-                print(f"⚠️ Не удалось извлечь текст для {reg_number}")
-        except Exception as e:
-            print(f"❌ Ошибка при анализе: {e}")
+        print(f"ℹ️ Данных в кэше для {reg_number} нет. Форма будет пустой.")
     
-    # Формируем HTML-форму с заполненными данными (или пустую)
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -548,6 +525,7 @@ async def guarantee_page(request: Request):
             .btn:hover {{ background: #d97706; }}
             .field {{ margin-bottom: 15px; }}
             .info {{ color: #666; font-size: 14px; margin-top: 10px; }}
+            .inline-label {{ display: flex; align-items: center; gap: 8px; font-weight: normal; }}
         </style>
     </head>
     <body>
@@ -600,8 +578,10 @@ async def guarantee_page(request: Request):
                 <input type="email" name="email" placeholder="user@example.com" required>
             </div>
             <div class="field">
-                <label>Комментарий (необязательно)</label>
-                <textarea name="comment" rows="3" style="width: 100%; padding: 8px;"></textarea>
+                <label class="inline-label">
+                    <input type="checkbox" name="contact_by_email" value="true">
+                    Не звонить мне, связываться только по email
+                </label>
             </div>
             <button type="submit" class="btn">Отправить заявку</button>
         </form>
@@ -625,24 +605,22 @@ async def guarantee_request(
     clientName: str = Form(...),
     phone: str = Form(...),
     email: str = Form(...),
-    comment: str = Form("")
+    contact_by_email: bool = Form(False)
 ):
-    # 1. Сохраняем в БД
     try:
         conn = await database.get_pool()
         async with conn.acquire() as conn:
             await conn.execute("""
                 INSERT INTO guarantee_requests 
                 (reg_number, nmc, end_date, bid_end_date, guarantee_type, 
-                 client_name, phone, email, comment)
+                 client_name, phone, email, contact_by_email)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """, regNumber, nmc, endDate, bidEndDate, guaranteeType,
-                clientName, phone, email, comment)
+                clientName, phone, email, contact_by_email)
         print(f"✅ Заявка для тендера {regNumber} сохранена в БД")
     except Exception as e:
         print(f"❌ Ошибка сохранения в БД: {e}")
 
-    # 2. Возвращаем страницу успеха (без писем)
     return HTMLResponse("""
     <!DOCTYPE html>
     <html>
