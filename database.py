@@ -32,7 +32,6 @@ async def get_pool():
 async def init_db():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Таблицы
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -85,7 +84,6 @@ async def init_db():
                 user_agent TEXT
             )
         """)
-        # Таблица для заявок на банковскую гарантию
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS guarantee_requests (
                 id SERIAL PRIMARY KEY,
@@ -97,12 +95,14 @@ async def init_db():
                 client_name TEXT,
                 phone TEXT,
                 email TEXT,
-                comment TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                bid_security TEXT,
+                contract_security TEXT,
+                contact_by_email BOOLEAN DEFAULT FALSE
             )
         """)
 
-        # Миграция: добавляем колонки, если их нет
+        # Миграции
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
@@ -111,8 +111,11 @@ async def init_db():
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS user_agent TEXT")
         await conn.execute("ALTER TABLE analysis_cache ADD COLUMN IF NOT EXISTS used_count INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE analysis_cache ADD COLUMN IF NOT EXISTS last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS bid_security TEXT")
+        await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS contract_security TEXT")
+        await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS contact_by_email BOOLEAN DEFAULT FALSE")
 
-    print("✅ База данных PostgreSQL инициализирована (с поддержкой кэша и заявок)")
+    print("✅ База данных PostgreSQL инициализирована (с поддержкой контакта по email)")
 
 # ================= ПОЛЬЗОВАТЕЛИ =================
 async def create_user(email: str, password: str):
@@ -189,10 +192,7 @@ async def deactivate_license(key):
 async def get_cached_analysis(reg_number):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT result_json FROM analysis_cache WHERE reg_number = $1",
-            reg_number
-        )
+        row = await conn.fetchrow("SELECT result_json FROM analysis_cache WHERE reg_number = $1", reg_number)
         if row:
             return json.loads(row["result_json"])
         return None
@@ -206,7 +206,6 @@ async def save_analysis_cache(reg_number, result):
         )
 
 async def increment_cache_usage(reg_number: str):
-    """Увеличивает счётчик использований кэша и обновляет дату последнего обращения."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -220,7 +219,6 @@ async def clear_cache():
         await conn.execute("DELETE FROM analysis_cache")
 
 async def clear_old_cache(days=30):
-    """Удаляет записи кэша старше N дней."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -258,7 +256,7 @@ async def check_and_increment_usage(email):
         )
         return True
 
-# ================= ПРОБНЫЙ ПЕРИОД (без защиты по IP+User-Agent) =================
+# ================= ПРОБНЫЙ ПЕРИОД =================
 async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = None, user_agent: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -268,7 +266,6 @@ async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = Non
         )
         if existing:
             return {"status": "ok", "trial_start": existing["start_date"]}
-
         now = datetime.now()
         await conn.execute(
             "INSERT INTO device_trials (device_id, start_date, trial_days, ip_address, user_agent, total_requests, total_tokens) VALUES ($1, $2, $3, $4, $5, 0, 0)",
@@ -301,7 +298,7 @@ async def check_trial_by_device(device_id: str) -> bool:
     status = await get_trial_status(device_id)
     return status.get("status") == "active"
 
-# ================= СТАТИСТИКА ИСПОЛЬЗОВАНИЯ =================
+# ================= СТАТИСТИКА =================
 async def increment_usage(license_key: str = None, device_id: str = None, tokens_used: int = 0):
     if not license_key and not device_id:
         return
