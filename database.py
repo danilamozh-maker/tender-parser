@@ -32,7 +32,6 @@ async def get_pool():
 async def init_db():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Таблицы (без изменений)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -99,12 +98,12 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 bid_security TEXT,
                 contract_security TEXT,
-                contact_by_email BOOLEAN DEFAULT FALSE
+                contact_by_email BOOLEAN DEFAULT FALSE,
+                inn TEXT
             )
         """)
 
-        # ===== МИГРАЦИИ (добавляем столбец inn) =====
-        # Существующие миграции
+        # Миграции (добавляем недостающие колонки)
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
@@ -116,17 +115,206 @@ async def init_db():
         await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS bid_security TEXT")
         await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS contract_security TEXT")
         await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS contact_by_email BOOLEAN DEFAULT FALSE")
-
-        # ===== НОВАЯ МИГРАЦИЯ: добавляем колонку inn =====
         await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS inn TEXT")
 
-    print("✅ База данных PostgreSQL инициализирована (добавлено поле inn)")
+    print("✅ База данных PostgreSQL инициализирована (с поддержкой inn и get_trial_status)")
 
-# ================= ОСТАЛЬНЫЕ ФУНКЦИИ (БЕЗ ИЗМЕНЕНИЙ) =================
-# (create_user, get_user, verify_password, generate_license_key, 
-# create_license, verify_and_activate_license, verify_license, 
-# deactivate_license, get_cached_analysis, save_analysis_cache, 
-# increment_cache_usage, clear_cache, clear_old_cache, 
-# get_user_plan_limit, check_and_increment_usage, 
-# start_trial, get_trial_status, check_trial_by_device, 
-# increment_usage – все остаются как у вас, я их не трогаю)
+# ================= ПОЛЬЗОВАТЕЛИ =================
+async def create_user(email: str, password: str):
+    password = password[:72]
+    hashed = sha256_crypt.hash(password)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute("INSERT INTO users (email, hashed_password) VALUES ($1, $2)", email, hashed)
+            return True
+        except asyncpg.UniqueViolationError:
+            return False
+
+async def get_user(email: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
+        return dict(row) if row else None
+
+def verify_password(plain_password: str, hashed_password: str):
+    plain_password = plain_password[:72]
+    return sha256_crypt.verify(plain_password, hashed_password)
+
+# ================= ЛИЦЕНЗИИ =================
+def generate_license_key():
+    alphabet = string.ascii_uppercase + string.digits
+    return '-'.join(''.join(secrets.choice(alphabet) for _ in range(4)) for _ in range(4))
+
+async def create_license(email=None, days_valid=30):
+    pool = await get_pool()
+    license_key = generate_license_key()
+    expires_at = datetime.now() + timedelta(days=days_valid)
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute(
+                "INSERT INTO licenses (license_key, user_email, expires_at, is_active, total_requests, total_tokens) VALUES ($1, $2, $3, $4, 0, 0)",
+                license_key, email, expires_at, True
+            )
+            return license_key
+        except asyncpg.UniqueViolationError:
+            return None
+
+async def verify_and_activate_license(key):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM licenses WHERE license_key = $1", key)
+        if not row:
+            return {"valid": False, "reason": "not_found"}
+        lic = dict(row)
+        if not lic["is_active"]:
+            return {"valid": False, "reason": "already_used"}
+        if datetime.now() > lic["expires_at"]:
+            return {"valid": False, "reason": "expired"}
+        await conn.execute("UPDATE licenses SET is_active = FALSE, activated_at = $1 WHERE license_key = $2", datetime.now(), key)
+        return {"valid": True, "expires_at": lic["expires_at"]}
+
+async def verify_license(key):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM licenses WHERE license_key = $1", key)
+        if not row:
+            return None
+        lic = dict(row)
+        if datetime.now() > lic["expires_at"]:
+            return {"valid": False, "reason": "expired"}
+        return {"valid": True, "expires_at": lic["expires_at"], "email": lic["user_email"]}
+
+async def deactivate_license(key):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE licenses SET is_active = FALSE WHERE license_key = $1", key)
+
+# ================= КЭШ АНАЛИЗА =================
+async def get_cached_analysis(reg_number):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT result_json FROM analysis_cache WHERE reg_number = $1", reg_number)
+        if row:
+            return json.loads(row["result_json"])
+        return None
+
+async def save_analysis_cache(reg_number, result):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO analysis_cache (reg_number, result_json, used_count, last_used) VALUES ($1, $2, 0, NOW()) ON CONFLICT (reg_number) DO UPDATE SET result_json = EXCLUDED.result_json",
+            reg_number, json.dumps(result, ensure_ascii=False)
+        )
+
+async def increment_cache_usage(reg_number: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE analysis_cache SET used_count = used_count + 1, last_used = NOW() WHERE reg_number = $1",
+            reg_number
+        )
+
+async def clear_cache():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM analysis_cache")
+
+async def clear_old_cache(days=30):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM analysis_cache WHERE created_at < NOW() - INTERVAL '$1 DAYS'",
+            days
+        )
+        return result
+
+# ================= ТАРИФИКАЦИЯ =================
+async def get_user_plan_limit(email):
+    return 50
+
+async def check_and_increment_usage(email):
+    month_year = datetime.now().strftime("%Y-%m")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT analyses_used, analyses_limit FROM user_usage WHERE user_email = $1 AND month_year = $2",
+            email, month_year
+        )
+        if not row:
+            limit = await get_user_plan_limit(email)
+            await conn.execute(
+                "INSERT INTO user_usage (user_email, month_year, analyses_used, analyses_limit) VALUES ($1, $2, 1, $3)",
+                email, month_year, limit
+            )
+            return True
+        used = row["analyses_used"]
+        limit = row["analyses_limit"]
+        if used >= limit:
+            return False
+        await conn.execute(
+            "UPDATE user_usage SET analyses_used = analyses_used + 1 WHERE user_email = $1 AND month_year = $2",
+            email, month_year
+        )
+        return True
+
+# ================= ПРОБНЫЙ ПЕРИОД =================
+async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = None, user_agent: str = None):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT start_date FROM device_trials WHERE device_id = $1",
+            device_id
+        )
+        if existing:
+            return {"status": "ok", "trial_start": existing["start_date"]}
+        now = datetime.now()
+        await conn.execute(
+            "INSERT INTO device_trials (device_id, start_date, trial_days, ip_address, user_agent, total_requests, total_tokens) VALUES ($1, $2, $3, $4, $5, 0, 0)",
+            device_id, now, trial_days, ip_address, user_agent
+        )
+        return {"status": "ok", "trial_start": now}
+
+# ===== НОВАЯ ФУНКЦИЯ (ИМЕННО ЕЁ НЕ ХВАТАЛО) =====
+async def get_trial_status(device_id: str):
+    """Возвращает статус пробного периода для device_id."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT start_date, trial_days FROM device_trials WHERE device_id = $1",
+            device_id
+        )
+        if not row:
+            return {"status": "not_started"}
+        start_date = row["start_date"]
+        trial_days = row["trial_days"]
+        days_passed = (datetime.now() - start_date).days
+        if days_passed >= trial_days:
+            return {"status": "expired", "days": days_passed}
+        else:
+            return {
+                "status": "active",
+                "days_left": trial_days - days_passed,
+                "trial_end": (start_date + timedelta(days=trial_days)).isoformat()
+            }
+
+async def check_trial_by_device(device_id: str) -> bool:
+    status = await get_trial_status(device_id)
+    return status.get("status") == "active"
+
+# ================= СТАТИСТИКА =================
+async def increment_usage(license_key: str = None, device_id: str = None, tokens_used: int = 0):
+    if not license_key and not device_id:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if license_key:
+            await conn.execute(
+                "UPDATE licenses SET total_requests = total_requests + 1, total_tokens = total_tokens + $1 WHERE license_key = $2",
+                tokens_used, license_key
+            )
+        elif device_id:
+            await conn.execute(
+                "UPDATE device_trials SET total_requests = total_requests + 1, total_tokens = total_tokens + $1 WHERE device_id = $2",
+                tokens_used, device_id
+            )
