@@ -30,7 +30,6 @@ MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
-
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
 MERCHANT_LOGIN = "tender_parser_CSB" # замени
 PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
@@ -82,21 +81,21 @@ async def send_max_notification(reg_number: str, client_name: str, phone: str, e
         f"🕐 **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
 
+    # chat_id передаётся как параметр URL
+    url = f"{MAX_API_URL}?chat_id={MAX_CHAT_ID}"
+
     headers = {
-        "Authorization": MAX_BOT_TOKEN,
+        "Authorization": MAX_BOT_TOKEN, # без префикса Bearer
         "Content-Type": "application/json"
     }
-    # 1. Формируем URL с chat_id в качестве параметра
-    url_with_chat_id = f"{MAX_API_URL}?chat_id={MAX_CHAT_ID}"
-    
+
     payload = {
-        "text": text,
-        "format": "markdown"
+        "text": text
     }
 
     try:
         async with httpx.AsyncClient(verify=False) as client:
-            response = await client.post(MAX_API_URL, headers=headers, json=payload, timeout=10)
+            response = await client.post(url, headers=headers, json=payload, timeout=10)
             if response.status_code == 200:
                 print(f"✅ Уведомление в MAX отправлено (тендер {reg_number})")
             else:
