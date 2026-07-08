@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from docx import Document
 import requests
-import httpx # добавлено для MAX API
+import httpx
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from urllib.parse import quote
@@ -30,6 +30,7 @@ MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
+
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
 MERCHANT_LOGIN = "tender_parser_CSB" # замени
 PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
@@ -37,9 +38,9 @@ PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
 # ============================================
 
 # ================= НАСТРОЙКИ MAX BOT =================
-MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "f9LHodD0cOJJR4mfk6UzbouO5cyuuYI5UvehN38OyoPbpI4wdbQc7nuXOq1jU7JZJ9vgJgpNR-tvkOdnUcFX")
-MAX_CHAT_ID = os.getenv("MAX_CHAT_ID", "-76698561483332")
-MAX_API_URL = "https://platform-api.max.ru/messages" # официальный URL для отправки сообщений
+MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "")
+MAX_CHAT_ID = os.getenv("MAX_CHAT_ID", "-76698561483332") # строка
+MAX_API_URL = "https://platform-api2.max.ru/messages"
 # =====================================================
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
@@ -82,13 +83,13 @@ async def send_max_notification(reg_number: str, client_name: str, phone: str, e
     )
 
     headers = {
-        "Authorization": MAX_BOT_TOKEN,
+        "Authorization": f"Bearer {MAX_BOT_TOKEN}",
         "Content-Type": "application/json"
     }
     payload = {
-        "chat_id": int(MAX_CHAT_ID),
+        "chat_id": MAX_CHAT_ID, # строка
         "text": text,
-        "format": "markdown" # поддерживается Markdown
+        "format": "markdown"
     }
 
     try:
