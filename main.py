@@ -63,33 +63,21 @@ async def health():
     return {"status": "ok"}
 
 # ================= СТРАНИЦЫ САЙТА =================
-
-# --- Главная страница ---
 @app.get("/", response_class=HTMLResponse)
 async def main_page():
     with open("templates/main.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
-# --- Страница контактов ---
 @app.get("/contacts", response_class=HTMLResponse)
 async def contacts_page():
     with open("templates/contacts.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
-# --- Страница оферты ---
 @app.get("/offer", response_class=HTMLResponse)
 async def offer_page():
     with open("templates/offer.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
-        
-@app.get("/updates.xml")
-async def updates_xml():
-    file_path = os.path.join(os.path.dirname(__file__), "updates.xml")
-    if not os.path.exists(file_path):
-        raise HTTPException(404, "Файл updates.xml не найден")
-    return FileResponse(file_path, media_type="application/xml")
 
-# --- Скачивание оферты (файл .docx) ---
 @app.get("/oferta")
 async def download_oferta():
     file_path = os.path.join("static", "oferta.docx")
@@ -101,7 +89,6 @@ async def download_oferta():
         filename="oferta.docx"
     )
 
-# --- Скачивание расширения (.crx и .zip) ---
 @app.get("/download-file/{filename}")
 async def download_file(filename: str):
     allowed_files = ["tender-parser-extension.crx", "tender-parser-extension.zip"]
@@ -116,24 +103,26 @@ async def download_file(filename: str):
         media_type = "application/zip"
     return FileResponse(file_path, media_type=media_type, filename=filename)
 
-# --- Редирект со старого /download на главную ---
 @app.get("/download")
 async def download_redirect():
     return RedirectResponse(url="/", status_code=302)
+
+# ================= UPDATES.XML =================
+@app.get("/updates.xml")
+async def updates_xml():
+    file_path = os.path.join(os.path.dirname(__file__), "updates.xml")
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "Файл updates.xml не найден")
+    return FileResponse(file_path, media_type="application/xml")
 
 # ================= ЭНДПОЙНТЫ РОБОКАССЫ =================
 @app.post("/api/create-payment")
 async def create_payment():
     inv_id = int(datetime.now().timestamp())
-    amount = 2500 # цена в рублях
-
+    amount = 2500
     signature = hashlib.md5(
         f"{MERCHANT_LOGIN}:{amount}:{inv_id}:{PASSWORD_1}".encode()
     ).hexdigest()
-
-    # Здесь можно сохранить заказ в БД со статусом pending
-    # ...
-
     return {
         "merchant_login": MERCHANT_LOGIN,
         "out_sum": amount,
@@ -147,45 +136,31 @@ async def create_payment():
 async def robokassa_result(request: Request):
     form = await request.form()
     data = dict(form)
-
     out_sum = data.get("OutSum")
     inv_id = data.get("InvId")
     signature = data.get("SignatureValue")
-
-    expected = hashlib.md5(
-        f"{out_sum}:{inv_id}:{PASSWORD_2}".encode()
-    ).hexdigest()
-
+    expected = hashlib.md5(f"{out_sum}:{inv_id}:{PASSWORD_2}".encode()).hexdigest()
     if signature.lower() != expected.lower():
         raise HTTPException(400, "Invalid signature")
-
-    # Обновляем статус заказа в БД и создаём лицензию
-    # Например:
-    # license_key = await database.create_license(days_valid=30)
-    # сохраняем в таблицу orders или licenses
-
+    # Здесь нужно создать лицензию и сохранить в БД
     return f"OK{inv_id}"
 
 @app.get("/robokassa/success")
 async def robokassa_success(request: Request):
     inv_id = request.query_params.get("InvId")
-    # Находим заказ в БД и получаем лицензионный ключ
-    # Для примера покажем заглушку
-    license_key = "XXXX-YYYY-ZZZZ-WWWW"
     return HTMLResponse(f"""
-    <!DOCTYPE html>
     <html>
     <head><meta charset="UTF-8"><title>Оплата успешна</title></head>
     <body style="font-family: Arial; text-align: center; padding: 40px;">
         <h1>✅ Оплата прошла успешно!</h1>
-        <p>Ваш лицензионный ключ: <strong>{license_key}</strong></p>
+        <p>Ваш лицензионный ключ: <strong>XXXX-YYYY-ZZZZ-WWWW</strong></p>
         <p>Скопируйте его и вставьте в расширение.</p>
         <a href="/">На главную</a>
     </body>
     </html>
     """)
 
-# ================= ЭНДПОЙНТ ДЛЯ ГЕНЕРАЦИИ ЛИЦЕНЗИИ (через админ-токен) =================
+# ================= ЛИЦЕНЗИИ =================
 @app.post("/api/create-order")
 async def create_order(request: Request):
     admin_token = request.headers.get("X-Admin-Token")
@@ -236,6 +211,7 @@ def read_excel(file_path):
         except Exception as e:
             return f"Ошибка чтения Excel: {e}"
 
+# ================= ЗАПРОСЫ К DEEPSEEK =================
 def query_deepseek(prompt, license_key=None, device_id=None):
     messages = [
         {"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
@@ -309,26 +285,7 @@ def analyze_file(file_path, selected_fields):
     filtered = [line for line in lines if any(line.strip().startswith(f) for f in selected_fields)]
     return "\n".join(filtered) if filtered else answer
 
-# ================= ЭНДПОЙНТЫ (защищённые) =================
-
-@app.post("/api/verify-license")
-async def verify_license_endpoint(request: Request):
-    try:
-        await check_access(request)
-        return {"valid": True}
-    except HTTPException:
-        return {"valid": False, "reason": "Unauthorized"}
-
-@app.post("/api/activate-license")
-async def activate_license(data: dict):
-    key = data.get("key")
-    if not key:
-        raise HTTPException(400, "Ключ не указан")
-    result = await database.verify_and_activate_license(key)
-    if not result["valid"]:
-        return {"valid": False, "reason": result["reason"]}
-    return {"valid": True, "expires_at": result["expires_at"]}
-
+# ================= ЭНДПОЙНТ АНАЛИЗА ТЕНДЕРОВ (с кэшированием) =================
 @app.post("/analyze_texts")
 async def analyze_texts(request: Request, data: dict):
     await check_access(request)
@@ -345,23 +302,42 @@ async def analyze_texts(request: Request, data: dict):
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
-    cached = await database.get_cached_analysis(reg_number)
-    if cached:
-    # Увеличиваем счётчик использования кэша
-        await database.increment_cache_usage(reg_number)
-        print(f"📦 Кэш для {reg_number} использован (всего: {cached.get('used_count', 0)})")
-        return {"url": tender.get("url", ""), "reg_number": reg_number, "analysis": cached}
+    async def analyze_one(tender):
+        reg_number = tender.get("regNumber", "")
+        
+        # 1. Проверяем кэш
+        cached = await database.get_cached_analysis(reg_number)
+        if cached:
+            await database.increment_cache_usage(reg_number)
+            print(f"📦 Кэш для {reg_number} использован (счётчик увеличен)")
+            return {
+                "url": tender.get("url", ""),
+                "reg_number": reg_number,
+                "analysis": cached
+            }
+        
+        # 2. Если кэша нет — вызываем DeepSeek
         tender_text = tender.get("text", "")
         if not tender_text or len(tender_text) < 100:
-            return {"url": tender.get("url", ""), "reg_number": reg_number, "error": "Недостаточно текста"}
+            return {
+                "url": tender.get("url", ""),
+                "reg_number": reg_number,
+                "error": "Недостаточно текста для анализа"
+            }
         start = time.time()
-        analysis_result = analyze_tender_text(tender_text, selected_fields, license_key=license_key, device_id=device_id)
+        analysis_result = analyze_tender_text(tender_text, selected_fields, license_key, device_id)
         await database.save_analysis_cache(reg_number, analysis_result)
-        print(f"⏱️ DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек")
-        return {"url": tender.get("url", ""), "reg_number": reg_number, "analysis": analysis_result}
+        print(f"⏱️ DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек (сохранён в кэш)")
+        return {
+            "url": tender.get("url", ""),
+            "reg_number": reg_number,
+            "analysis": analysis_result
+        }
 
     tasks = [analyze_one(t) for t in tenders_data]
     results = await asyncio.gather(*tasks)
+
+    # Формируем DOCX
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
     doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
@@ -378,16 +354,23 @@ async def analyze_texts(request: Request, data: dict):
             else:
                 doc.add_paragraph(str(analysis))
         doc.add_page_break()
+
     word_buffer = io.BytesIO()
     doc.save(word_buffer)
     word_buffer.seek(0)
+
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zf:
         zf.writestr(f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx', word_buffer.getvalue())
+
     zip_buffer.seek(0)
     filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     encoded = quote(filename)
-    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+    return Response(
+        zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+    )
 
 def analyze_tender_text(text, selected_fields, license_key=None, device_id=None):
     if not selected_fields:
@@ -411,6 +394,7 @@ def analyze_tender_text(text, selected_fields, license_key=None, device_id=None)
             result[k.strip()] = v.strip()
     return result
 
+# ================= УПАКОВКА ФАЙЛОВ =================
 def detect_file_type(content: bytes) -> str:
     if content.startswith(b'%PDF'): return 'pdf'
     if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
@@ -495,7 +479,7 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТЫ ДЛЯ ПРОБНОГО ПЕРИОДА =================
+# ================= ПРОБНЫЙ ПЕРИОД =================
 @app.post("/api/trial/start")
 async def start_trial(request: Request, data: dict):
     device_id = data.get("device_id")
@@ -590,6 +574,25 @@ async def ask_ai(request: Request, data: dict):
 Дай ответ в виде текста (2-4 предложения), который будет полезен для бизнеса."""
     answer = query_deepseek(prompt)
     return {"answer": answer}
+
+# ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
+@app.post("/api/verify-license")
+async def verify_license_endpoint(request: Request):
+    try:
+        await check_access(request)
+        return {"valid": True}
+    except HTTPException:
+        return {"valid": False, "reason": "Unauthorized"}
+
+@app.post("/api/activate-license")
+async def activate_license(data: dict):
+    key = data.get("key")
+    if not key:
+        raise HTTPException(400, "Ключ не указан")
+    result = await database.verify_and_activate_license(key)
+    if not result["valid"]:
+        return {"valid": False, "reason": result["reason"]}
+    return {"valid": True, "expires_at": result["expires_at"]}
 
 # ================= ЗАПУСК =================
 if __name__ == "__main__":
