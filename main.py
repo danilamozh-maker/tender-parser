@@ -39,13 +39,14 @@ PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
 PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
 # ============================================
 
-# ================= НАСТРОЙКИ SMTP (переменные окружения) =================
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.yandex.ru")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 465))
-SMTP_USER = os.getenv("SMTP_USER", "arsenyorloff@yandex.ru")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "lepfjuyayxtypjgu")
-SMTP_RECIPIENT = os.getenv("SMTP_RECIPIENT", "arsenyorloff@yandex.ru")
-SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
+# ================= НАСТРОЙКИ SMTP (ЗАХАРДКОЖЕНЫ) =================
+SMTP_HOST = "smtp.yandex.ru"
+SMTP_PORT = 587 # STARTTLS
+SMTP_USER = "arsenyorloff@yandex.ru" # ЗАМЕНИ НА СВОЮ
+SMTP_PASSWORD = "lepfjuyayxtypjgu" # ЗАМЕНИ НА ПАРОЛЬ ПРИЛОЖЕНИЯ
+SMTP_RECIPIENT = "arsenyorloff@yandex.ru" # ЗАМЕНИ НА ПОЧТУ МЕНЕДЖЕРА
+SMTP_FROM = SMTP_USER # обычно та же, что и SMTP_USER
+# ============================================
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
 @app.on_event("startup")
@@ -70,10 +71,10 @@ async def check_access(request: Request):
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
-# ================= ОТПРАВКА ПИСЬМА (АСИНХРОННАЯ) =================
+# ================= ОТПРАВКА ПИСЬМА (АСИНХРОННАЯ, ПОРТ 587) =================
 async def send_guarantee_email(data: dict):
     """
-    Отправляет заявку на банковскую гарантию по email (асинхронно).
+    Отправляет заявку на банковскую гарантию по email (асинхронно, через STARTTLS).
     """
     if not SMTP_USER or not SMTP_PASSWORD or not SMTP_RECIPIENT:
         print("⚠️ SMTP не настроен (пропущена отправка письма)")
@@ -106,14 +107,14 @@ async def send_guarantee_email(data: dict):
 
     def send_sync():
         try:
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+                server.starttls()
                 server.login(SMTP_USER, SMTP_PASSWORD)
                 server.sendmail(SMTP_FROM, SMTP_RECIPIENT, msg.as_string())
-            print("✅ Письмо с заявкой отправлено")
+            print("✅ Письмо с заявкой отправлено (порт 587, STARTTLS)")
         except Exception as e:
             print(f"❌ Ошибка отправки письма: {e}")
 
-    # Выполняем в отдельном потоке, чтобы не блокировать цикл событий
     await asyncio.to_thread(send_sync)
 
 # ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ С СЕРВЕРА =================
@@ -703,7 +704,7 @@ async def guarantee_request(
     except Exception as e:
         print(f"❌ Ошибка сохранения в БД: {e}")
 
-    # 2. Отправляем письмо (асинхронно)
+    # 2. Отправляем письмо в фоне (не блокируем ответ)
     data = {
         "regNumber": regNumber,
         "nmc": nmc,
@@ -717,7 +718,7 @@ async def guarantee_request(
         "email": email,
         "comment": comment
     }
-    await send_guarantee_email(data) # теперь асинхронно, не блокирует
+    asyncio.create_task(send_guarantee_email(data))
 
     # 3. Возвращаем страницу успеха
     return HTMLResponse("""
