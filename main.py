@@ -683,7 +683,7 @@ async def guarantee_page(request: Request):
                 </label>
                 <label>
                     <input type="checkbox" id="consent_terms" name="consent_terms" required>
-                    Я принимаю условия пользовательского соглашения и политики конфиденциальности
+                    Я принимаю условия <a href="https://csb24-tender.ru/offer" target="_blank">Пользовательского соглашения</a> и <a href="https://csb24-tender.ru/privacy-policy" target="_blank">Политики конфиденциальности</a>
                 </label>
             </div>
 
