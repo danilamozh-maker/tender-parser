@@ -20,6 +20,7 @@ import uvicorn
 import database
 import parser
 from bs4 import BeautifulSoup
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
 
@@ -237,6 +238,8 @@ async def create_order(request: Request):
     result = await database.verify_license(license_key)
     expires_at = result.get("expires_at") if result and result.get("valid") else None
     return {"status": "success", "license_key": license_key, "expires_at": expires_at}
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
 def read_docx(file_path):
