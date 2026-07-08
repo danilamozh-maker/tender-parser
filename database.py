@@ -85,6 +85,22 @@ async def init_db():
                 user_agent TEXT
             )
         """)
+        # Таблица для заявок на банковскую гарантию
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS guarantee_requests (
+                id SERIAL PRIMARY KEY,
+                reg_number TEXT,
+                nmc TEXT,
+                end_date TEXT,
+                bid_end_date TEXT,
+                guarantee_type TEXT,
+                client_name TEXT,
+                phone TEXT,
+                email TEXT,
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
         # Миграция: добавляем колонки, если их нет
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
@@ -93,11 +109,10 @@ async def init_db():
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS ip_address TEXT")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS user_agent TEXT")
-        # Для analysis_cache
         await conn.execute("ALTER TABLE analysis_cache ADD COLUMN IF NOT EXISTS used_count INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE analysis_cache ADD COLUMN IF NOT EXISTS last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
-    print("✅ База данных PostgreSQL инициализирована (с поддержкой кэша и статистики)")
+    print("✅ База данных PostgreSQL инициализирована (с поддержкой кэша и заявок)")
 
 # ================= ПОЛЬЗОВАТЕЛИ =================
 async def create_user(email: str, password: str):
