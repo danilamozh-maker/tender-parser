@@ -70,12 +70,10 @@ async def check_access(request: Request):
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
-# ================= ОТПРАВКА ПИСЬМА =================
-def send_guarantee_email(data: dict):
+# ================= ОТПРАВКА ПИСЬМА (АСИНХРОННАЯ) =================
+async def send_guarantee_email(data: dict):
     """
-    Отправляет заявку на банковскую гарантию по email.
-    data содержит: regNumber, nmc, endDate, bidEndDate, guaranteeType,
-                   clientName, phone, email, comment
+    Отправляет заявку на банковскую гарантию по email (асинхронно).
     """
     if not SMTP_USER or not SMTP_PASSWORD or not SMTP_RECIPIENT:
         print("⚠️ SMTP не настроен (пропущена отправка письма)")
@@ -106,13 +104,17 @@ def send_guarantee_email(data: dict):
     msg['Date'] = formatdate(localtime=True)
     msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-    try:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_FROM, SMTP_RECIPIENT, msg.as_string())
-        print("✅ Письмо с заявкой отправлено")
-    except Exception as e:
-        print(f"❌ Ошибка отправки письма: {e}")
+    def send_sync():
+        try:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.sendmail(SMTP_FROM, SMTP_RECIPIENT, msg.as_string())
+            print("✅ Письмо с заявкой отправлено")
+        except Exception as e:
+            print(f"❌ Ошибка отправки письма: {e}")
+
+    # Выполняем в отдельном потоке, чтобы не блокировать цикл событий
+    await asyncio.to_thread(send_sync)
 
 # ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ С СЕРВЕРА =================
 def fetch_tender_text_from_server(reg_number: str, type: str = "44") -> str:
@@ -701,7 +703,7 @@ async def guarantee_request(
     except Exception as e:
         print(f"❌ Ошибка сохранения в БД: {e}")
 
-    # 2. Отправляем письмо (не блокируем ответ)
+    # 2. Отправляем письмо (асинхронно)
     data = {
         "regNumber": regNumber,
         "nmc": nmc,
@@ -715,8 +717,7 @@ async def guarantee_request(
         "email": email,
         "comment": comment
     }
-    # Запускаем в фоновом потоке, чтобы не ждать
-    asyncio.create_task(send_guarantee_email(data))
+    await send_guarantee_email(data) # теперь асинхронно, не блокирует
 
     # 3. Возвращаем страницу успеха
     return HTMLResponse("""
