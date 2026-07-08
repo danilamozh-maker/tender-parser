@@ -37,8 +37,8 @@ PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
 # ============================================
 
 # ================= НАСТРОЙКИ MAX BOT =================
-MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "")
-MAX_CHAT_ID = os.getenv("MAX_CHAT_ID", "")
+MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "f9LHodD0cOJJR4mfk6UzbouO5cyuuYI5UvehN38OyoPbpI4wdbQc7nuXOq1jU7JZJ9vgJgpNR-tvkOdnUcFX")
+MAX_CHAT_ID = os.getenv("MAX_CHAT_ID", "-76698561483332")
 MAX_API_URL = "https://platform-api.max.ru/messages" # официальный URL для отправки сообщений
 # =====================================================
 
