@@ -6,8 +6,12 @@ import json
 import time
 import asyncio
 import hashlib
+import smtplib
 from pathlib import Path
 from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.utils import formatdate
 from docx import Document
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
@@ -18,6 +22,7 @@ import xlrd
 import uvicorn
 import database
 import parser
+from bs4 import BeautifulSoup
 
 app = FastAPI()
 
@@ -33,6 +38,14 @@ MERCHANT_LOGIN = "tender_parser_CSB" # замени
 PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
 PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
 # ============================================
+
+# ================= НАСТРОЙКИ SMTP (переменные окружения) =================
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.yandex.ru")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 465))
+SMTP_USER = os.getenv("SMTP_USER", "arsenyorloff@yandex.ru")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "lepfjuyayxtypjgu")
+SMTP_RECIPIENT = os.getenv("SMTP_RECIPIENT", "arsenyorloff@yandex.ru")
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
 @app.on_event("startup")
@@ -56,6 +69,77 @@ async def check_access(request: Request):
         if is_active:
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
+
+# ================= ОТПРАВКА ПИСЬМА =================
+def send_guarantee_email(data: dict):
+    """
+    Отправляет заявку на банковскую гарантию по email.
+    data содержит: regNumber, nmc, endDate, bidEndDate, guaranteeType,
+                   clientName, phone, email, comment
+    """
+    if not SMTP_USER or not SMTP_PASSWORD or not SMTP_RECIPIENT:
+        print("⚠️ SMTP не настроен (пропущена отправка письма)")
+        return
+
+    subject = f"Новая заявка на банковскую гарантию (тендер {data.get('regNumber', '')})"
+    
+    body = f"""
+    Поступила новая заявка на банковскую гарантию.
+
+    Номер тендера: {data.get('regNumber', 'Не указан')}
+    Тип гарантии: {data.get('guaranteeType', 'Не указан')}
+    Начальная цена (НМЦ): {data.get('nmc', 'Не указана')}
+    Дата окончания контракта: {data.get('endDate', 'Не указана')}
+    Дата окончания подачи заявок: {data.get('bidEndDate', 'Не указана')}
+
+    Данные клиента:
+    Имя: {data.get('clientName', 'Не указано')}
+    Телефон: {data.get('phone', 'Не указан')}
+    Email: {data.get('email', 'Не указан')}
+    Комментарий: {data.get('comment', 'Нет')}
+    """
+
+    msg = MIMEMultipart()
+    msg['From'] = SMTP_FROM
+    msg['To'] = SMTP_RECIPIENT
+    msg['Subject'] = subject
+    msg['Date'] = formatdate(localtime=True)
+    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+    try:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, SMTP_RECIPIENT, msg.as_string())
+        print("✅ Письмо с заявкой отправлено")
+    except Exception as e:
+        print(f"❌ Ошибка отправки письма: {e}")
+
+# ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ С СЕРВЕРА =================
+def fetch_tender_text_from_server(reg_number: str, type: str = "44") -> str:
+    """
+    Загружает печатную форму тендера с zakupki.gov.ru и извлекает текст.
+    """
+    if type == "44":
+        url = f"https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber={reg_number}"
+    elif type == "223":
+        url = f"https://zakupki.gov.ru/epz/order/notice/notice223/printForm/view.html?regNumber={reg_number}"
+    else:
+        return ""
+    
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        for selector in ['.print-form-content', '.notice-body', '.content', '.view-content', '.main-content', 'body']:
+            el = soup.select_one(selector)
+            if el:
+                text = el.get_text(separator='\n', strip=True)
+                if len(text) > 100:
+                    return text
+        return soup.body.get_text(separator='\n', strip=True) if soup.body else ""
+    except Exception as e:
+        print(f"❌ Ошибка при загрузке печатной формы: {e}")
+        return ""
 
 # ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/health")
@@ -285,7 +369,29 @@ def analyze_file(file_path, selected_fields):
     filtered = [line for line in lines if any(line.strip().startswith(f) for f in selected_fields)]
     return "\n".join(filtered) if filtered else answer
 
-# ================= ЭНДПОЙНТ АНАЛИЗА ТЕНДЕРОВ (с кэшированием) =================
+def analyze_tender_text(text, selected_fields, license_key=None, device_id=None):
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+    fields_str = "\n".join(f"{field}: " for field in selected_fields)
+    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
+Ответ должен быть строго в таком формате (каждый пункт с новой строки):
+{fields_str}
+Вот текст для анализа:
+{text[:8000]}
+Извлеки данные и напиши в указанном формате."""
+    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
+    result = {}
+    for line in answer.split('\n'):
+        if ':' in line:
+            k, v = line.split(':', 1)
+            result[k.strip()] = v.strip()
+    return result
+
+# ================= ЭНДПОЙНТ АНАЛИЗА ТЕНДЕРОВ =================
 @app.post("/analyze_texts")
 async def analyze_texts(request: Request, data: dict):
     await check_access(request)
@@ -304,8 +410,6 @@ async def analyze_texts(request: Request, data: dict):
 
     async def analyze_one(tender):
         reg_number = tender.get("regNumber", "")
-        
-        # 1. Проверяем кэш
         cached = await database.get_cached_analysis(reg_number)
         if cached:
             await database.increment_cache_usage(reg_number)
@@ -315,8 +419,6 @@ async def analyze_texts(request: Request, data: dict):
                 "reg_number": reg_number,
                 "analysis": cached
             }
-        
-        # 2. Если кэша нет — вызываем DeepSeek
         tender_text = tender.get("text", "")
         if not tender_text or len(tender_text) < 100:
             return {
@@ -337,7 +439,6 @@ async def analyze_texts(request: Request, data: dict):
     tasks = [analyze_one(t) for t in tenders_data]
     results = await asyncio.gather(*tasks)
 
-    # Формируем DOCX
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
     doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
@@ -371,28 +472,6 @@ async def analyze_texts(request: Request, data: dict):
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     )
-
-def analyze_tender_text(text, selected_fields, license_key=None, device_id=None):
-    if not selected_fields:
-        selected_fields = [
-            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
-            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
-            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
-        ]
-    fields_str = "\n".join(f"{field}: " for field in selected_fields)
-    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
-Ответ должен быть строго в таком формате (каждый пункт с новой строки):
-{fields_str}
-Вот текст для анализа:
-{text[:8000]}
-Извлеки данные и напиши в указанном формате."""
-    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
-    result = {}
-    for line in answer.split('\n'):
-        if ':' in line:
-            k, v = line.split(':', 1)
-            result[k.strip()] = v.strip()
-    return result
 
 # ================= УПАКОВКА ФАЙЛОВ =================
 def detect_file_type(content: bytes) -> str:
@@ -478,6 +557,181 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+
+# ================= ЭНДПОЙНТ ДЛЯ БАНКОВСКОЙ ГАРАНТИИ =================
+@app.get("/guarantee", response_class=HTMLResponse)
+async def guarantee_page(request: Request):
+    reg_number = request.query_params.get("regNumber")
+    if not reg_number:
+        return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
+    
+    # Пытаемся получить данные из кэша
+    cached = await database.get_cached_analysis(reg_number)
+    data = cached if cached else {}
+    
+    # Если кэша нет — выполняем анализ
+    if not cached:
+        print(f"🔍 Кэш для {reg_number} не найден, выполняем анализ...")
+        try:
+            # 1. Получаем текст печатной формы
+            text = fetch_tender_text_from_server(reg_number)
+            if text and len(text) > 100:
+                # 2. Анализируем через DeepSeek
+                selected_fields = [
+                    "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+                    "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+                    "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+                ]
+                analysis_result = analyze_tender_text(text, selected_fields)
+                # 3. Сохраняем в кэш
+                await database.save_analysis_cache(reg_number, analysis_result)
+                data = analysis_result
+                print(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш")
+            else:
+                print(f"⚠️ Не удалось извлечь текст для {reg_number}")
+        except Exception as e:
+            print(f"❌ Ошибка при анализе: {e}")
+    
+    # Формируем HTML-форму с заполненными данными
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Заявка на банковскую гарантию</title>
+        <style>
+            body {{ font-family: Arial; padding: 20px; max-width: 600px; margin: auto; }}
+            label {{ display: block; margin-top: 10px; font-weight: bold; }}
+            input, select {{ width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px; }}
+            .btn {{ background: #f59e0b; color: white; border: none; padding: 12px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 20px; }}
+            .btn:hover {{ background: #d97706; }}
+            .field {{ margin-bottom: 15px; }}
+            .info {{ color: #666; font-size: 14px; margin-top: 10px; }}
+        </style>
+    </head>
+    <body>
+        <h1>Заявка на банковскую гарантию</h1>
+        <form action="/api/guarantee/request" method="post">
+            <input type="hidden" name="regNumber" value="{reg_number}">
+            
+            <div class="field">
+                <label>Номер тендера</label>
+                <input type="text" value="{reg_number}" readonly>
+            </div>
+            <div class="field">
+                <label>Начальная цена (НМЦ)</label>
+                <input type="text" name="nmc" value="{data.get('Начальная цена (НМЦ)', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Дата окончания контракта</label>
+                <input type="text" name="endDate" value="{data.get('ДАТА ОКОНЧАНИЯ КОНТРАКТА', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Дата окончания подачи заявок</label>
+                <input type="text" name="bidEndDate" value="{data.get('ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Обеспечение заявки</label>
+                <input type="text" name="bidSecurity" value="{data.get('Обеспечение заявки', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Обеспечение контракта</label>
+                <input type="text" name="contractSecurity" value="{data.get('Обеспечение контракта', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Тип гарантии</label>
+                <select name="guaranteeType" required>
+                    <option value="">Выберите</option>
+                    <option value="participation">Обеспечение заявки (участие)</option>
+                    <option value="execution">Обеспечение исполнения контракта</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>Ваше имя</label>
+                <input type="text" name="clientName" placeholder="Иванов Иван Иванович" required>
+            </div>
+            <div class="field">
+                <label>Телефон</label>
+                <input type="tel" name="phone" placeholder="+7 (999) 123-45-67" required>
+            </div>
+            <div class="field">
+                <label>Email</label>
+                <input type="email" name="email" placeholder="user@example.com" required>
+            </div>
+            <div class="field">
+                <label>Комментарий (необязательно)</label>
+                <textarea name="comment" rows="3" style="width: 100%; padding: 8px;"></textarea>
+            </div>
+            <button type="submit" class="btn">Отправить заявку</button>
+        </form>
+        <div style="margin-top: 20px; font-size: 13px; color: #666;">
+            <a href="/">На главную</a>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+@app.post("/api/guarantee/request")
+async def guarantee_request(
+    regNumber: str = Form(...),
+    nmc: str = Form(""),
+    endDate: str = Form(""),
+    bidEndDate: str = Form(""),
+    bidSecurity: str = Form(""),
+    contractSecurity: str = Form(""),
+    guaranteeType: str = Form(...),
+    clientName: str = Form(...),
+    phone: str = Form(...),
+    email: str = Form(...),
+    comment: str = Form("")
+):
+    # 1. Сохраняем в БД
+    try:
+        conn = await database.get_pool()
+        async with conn.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO guarantee_requests 
+                (reg_number, nmc, end_date, bid_end_date, guarantee_type, 
+                 client_name, phone, email, comment)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """, regNumber, nmc, endDate, bidEndDate, guaranteeType,
+                clientName, phone, email, comment)
+        print(f"✅ Заявка для тендера {regNumber} сохранена в БД")
+    except Exception as e:
+        print(f"❌ Ошибка сохранения в БД: {e}")
+
+    # 2. Отправляем письмо (не блокируем ответ)
+    data = {
+        "regNumber": regNumber,
+        "nmc": nmc,
+        "endDate": endDate,
+        "bidEndDate": bidEndDate,
+        "bidSecurity": bidSecurity,
+        "contractSecurity": contractSecurity,
+        "guaranteeType": guaranteeType,
+        "clientName": clientName,
+        "phone": phone,
+        "email": email,
+        "comment": comment
+    }
+    # Запускаем в фоновом потоке, чтобы не ждать
+    asyncio.create_task(send_guarantee_email(data))
+
+    # 3. Возвращаем страницу успеха
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><title>Заявка отправлена</title></head>
+    <body style="text-align: center; padding: 40px; font-family: Arial;">
+        <h1 style="color: #10b981;">✅ Заявка успешно отправлена!</h1>
+        <p>Мы свяжемся с вами в ближайшее время.</p>
+        <p style="margin-top: 20px;">
+            <a href="/" style="color: #667eea; text-decoration: none;">← На главную</a>
+        </p>
+    </body>
+    </html>
+    """)
 
 # ================= ПРОБНЫЙ ПЕРИОД =================
 @app.post("/api/trial/start")
