@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from docx import Document
 import requests
+import httpx # добавлено для MAX API
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from urllib.parse import quote
@@ -29,12 +30,17 @@ MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
-
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
 MERCHANT_LOGIN = "tender_parser_CSB" # замени
 PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
 PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
 # ============================================
+
+# ================= НАСТРОЙКИ MAX BOT =================
+MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "")
+MAX_CHAT_ID = os.getenv("MAX_CHAT_ID", "")
+MAX_API_URL = "https://platform-api.max.ru/messages" # официальный URL для отправки сообщений
+# =====================================================
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
 @app.on_event("startup")
@@ -58,6 +64,42 @@ async def check_access(request: Request):
         if is_active:
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
+
+# ================= ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЯ В MAX =================
+async def send_max_notification(reg_number: str, client_name: str, phone: str, email: str):
+    """Отправляет уведомление о новой заявке в мессенджер MAX."""
+    if not MAX_BOT_TOKEN or not MAX_CHAT_ID:
+        print("⚠️ MAX Bot не настроен: пропуск уведомления")
+        return
+
+    text = (
+        f"📩 **Новая заявка на банковскую гарантию!**\n\n"
+        f"🔹 **Номер тендера:** {reg_number}\n"
+        f"👤 **Клиент:** {client_name}\n"
+        f"📞 **Телефон:** {phone}\n"
+        f"✉️ **Email:** {email}\n"
+        f"🕐 **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    )
+
+    headers = {
+        "Authorization": MAX_BOT_TOKEN,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "chat_id": int(MAX_CHAT_ID),
+        "text": text,
+        "format": "markdown" # поддерживается Markdown
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(MAX_API_URL, headers=headers, json=payload, timeout=10)
+            if response.status_code == 200:
+                print(f"✅ Уведомление в MAX отправлено (тендер {reg_number})")
+            else:
+                print(f"❌ Ошибка MAX API: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"❌ Исключение при отправке в MAX: {e}")
 
 # ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/health")
@@ -506,11 +548,9 @@ async def guarantee_page(request: Request):
     if not reg_number:
         return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
     
-    # Пытаемся получить данные из кэша
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
     
-    # Формируем HTML-форму с заполненными данными (исправленный чекбокс)
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -594,7 +634,6 @@ async def guarantee_page(request: Request):
                 <label>Email</label>
                 <input type="email" name="email" placeholder="user@example.com" required>
             </div>
-            <!-- Исправленный чекбокс: выровнен влево, текст рядом -->
             <div class="inline-label">
                 <input type="checkbox" name="contact_by_email" value="true">
                 <span>Не звонить мне, связываться только по email</span>
@@ -634,6 +673,12 @@ async def guarantee_request(
             """, regNumber, nmc, endDate, bidEndDate, guaranteeType,
                 clientName, phone, email, contact_by_email)
         print(f"✅ Заявка для тендера {regNumber} сохранена в БД")
+
+        # ===== ОТПРАВКА УВЕДОМЛЕНИЯ В MAX (фоновая задача) =====
+        asyncio.create_task(
+            send_max_notification(regNumber, clientName, phone, email)
+        )
+
     except Exception as e:
         print(f"❌ Ошибка сохранения в БД: {e}")
 
