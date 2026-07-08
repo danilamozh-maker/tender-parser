@@ -29,10 +29,11 @@ MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
+
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
-MERCHANT_LOGIN = "tender_parser_csb"
-PASSWORD_1 = "твой_пароль_1"
-PASSWORD_2 = "твой_пароль_2"
+MERCHANT_LOGIN = "tender_parser_CSB" # замени
+PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
+PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
 # ============================================
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
@@ -58,14 +59,16 @@ async def check_access(request: Request):
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
-# ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ =================
+# ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ (С ЛОГИРОВАНИЕМ) =================
 def fetch_tender_text_from_server(reg_number: str, type: str = "44") -> str:
     if type == "44":
+        # Используем view.html, как в расширении
         url = f"https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber={reg_number}"
     elif type == "223":
         url = f"https://zakupki.gov.ru/epz/order/notice/notice223/printForm/view.html?regNumber={reg_number}"
     else:
         return ""
+    print(f"📥 Загружаем печатную форму: {url}")
     try:
         response = requests.get(url, timeout=30)
         response.raise_for_status()
@@ -75,8 +78,11 @@ def fetch_tender_text_from_server(reg_number: str, type: str = "44") -> str:
             if el:
                 text = el.get_text(separator='\n', strip=True)
                 if len(text) > 100:
+                    print(f"📄 Текст загружен, длина: {len(text)}")
                     return text
-        return soup.body.get_text(separator='\n', strip=True) if soup.body else ""
+        text = soup.body.get_text(separator='\n', strip=True) if soup.body else ""
+        print(f"📄 Текст из body, длина: {len(text)}")
+        return text
     except Exception as e:
         print(f"❌ Ошибка при загрузке печатной формы: {e}")
         return ""
