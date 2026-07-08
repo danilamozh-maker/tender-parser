@@ -32,6 +32,7 @@ async def get_pool():
 async def init_db():
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Таблицы
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -57,7 +58,9 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS analysis_cache (
                 reg_number TEXT PRIMARY KEY,
                 result_json TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                used_count INTEGER DEFAULT 0,
+                last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         await conn.execute("""
@@ -83,15 +86,20 @@ async def init_db():
             )
         """)
 
+        # Миграция: добавляем колонки, если их нет
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS ip_address TEXT")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS user_agent TEXT")
+        # Для analysis_cache
+        await conn.execute("ALTER TABLE analysis_cache ADD COLUMN IF NOT EXISTS used_count INTEGER DEFAULT 0")
+        await conn.execute("ALTER TABLE analysis_cache ADD COLUMN IF NOT EXISTS last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
-    print("✅ База данных PostgreSQL инициализирована (без защиты по IP+User-Agent)")
+    print("✅ База данных PostgreSQL инициализирована (с поддержкой кэша и статистики)")
 
+# ================= ПОЛЬЗОВАТЕЛИ =================
 async def create_user(email: str, password: str):
     password = password[:72]
     hashed = sha256_crypt.hash(password)
@@ -113,6 +121,7 @@ def verify_password(plain_password: str, hashed_password: str):
     plain_password = plain_password[:72]
     return sha256_crypt.verify(plain_password, hashed_password)
 
+# ================= ЛИЦЕНЗИИ =================
 def generate_license_key():
     alphabet = string.ascii_uppercase + string.digits
     return '-'.join(''.join(secrets.choice(alphabet) for _ in range(4)) for _ in range(4))
@@ -161,10 +170,14 @@ async def deactivate_license(key):
     async with pool.acquire() as conn:
         await conn.execute("UPDATE licenses SET is_active = FALSE WHERE license_key = $1", key)
 
+# ================= КЭШ АНАЛИЗА =================
 async def get_cached_analysis(reg_number):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT result_json FROM analysis_cache WHERE reg_number = $1", reg_number)
+        row = await conn.fetchrow(
+            "SELECT result_json FROM analysis_cache WHERE reg_number = $1",
+            reg_number
+        )
         if row:
             return json.loads(row["result_json"])
         return None
@@ -173,8 +186,17 @@ async def save_analysis_cache(reg_number, result):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO analysis_cache (reg_number, result_json) VALUES ($1, $2) ON CONFLICT (reg_number) DO UPDATE SET result_json = EXCLUDED.result_json",
+            "INSERT INTO analysis_cache (reg_number, result_json, used_count, last_used) VALUES ($1, $2, 0, NOW()) ON CONFLICT (reg_number) DO UPDATE SET result_json = EXCLUDED.result_json",
             reg_number, json.dumps(result, ensure_ascii=False)
+        )
+
+async def increment_cache_usage(reg_number: str):
+    """Увеличивает счётчик использований кэша и обновляет дату последнего обращения."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE analysis_cache SET used_count = used_count + 1, last_used = NOW() WHERE reg_number = $1",
+            reg_number
         )
 
 async def clear_cache():
@@ -182,6 +204,17 @@ async def clear_cache():
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM analysis_cache")
 
+async def clear_old_cache(days=30):
+    """Удаляет записи кэша старше N дней."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM analysis_cache WHERE created_at < NOW() - INTERVAL '$1 DAYS'",
+            days
+        )
+        return result
+
+# ================= ТАРИФИКАЦИЯ =================
 async def get_user_plan_limit(email):
     return 50
 
@@ -210,7 +243,7 @@ async def check_and_increment_usage(email):
         )
         return True
 
-# ================= ПРОБНЫЙ ПЕРИОД (ТОЛЬКО ПО DEVICE_ID, БЕЗ IP+USER-AGENT) =================
+# ================= ПРОБНЫЙ ПЕРИОД (без защиты по IP+User-Agent) =================
 async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = None, user_agent: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -253,6 +286,7 @@ async def check_trial_by_device(device_id: str) -> bool:
     status = await get_trial_status(device_id)
     return status.get("status") == "active"
 
+# ================= СТАТИСТИКА ИСПОЛЬЗОВАНИЯ =================
 async def increment_usage(license_key: str = None, device_id: str = None, tokens_used: int = 0):
     if not license_key and not device_id:
         return
