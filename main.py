@@ -23,9 +23,14 @@ from bs4 import BeautifulSoup
 app = FastAPI()
 
 # ================= НАСТРОЙКИ =================
-OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
-API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # замени на свой
-MODEL_NAME = "deepseek-chat"
+# OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
+# API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # замени на свой
+# MODEL_NAME = "deepseek-chat"
+# ================= НАСТРОЙКИ OPENROUTER =================
+OLLAMA_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+API_KEY = "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"
+MODEL_NAME = "google/gemini-2.0-flash-exp:free" # или другую бесплатную модель
+# ========================================================
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
