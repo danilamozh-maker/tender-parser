@@ -24,18 +24,16 @@ app = FastAPI()
 
 # ================= НАСТРОЙКИ =================
 OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
-API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56"
+API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # замени на свой
 MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
 
-
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
-MERCHANT_LOGIN = "tender_parser_CSB" # замени
-PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
-PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
+MERCHANT_LOGIN = "tender_parser_csb"
+PASSWORD_1 = "твой_пароль_1"
+PASSWORD_2 = "твой_пароль_2"
 # ============================================
-
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
 @app.on_event("startup")
@@ -498,19 +496,38 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТ ДЛЯ БАНКОВСКОЙ ГАРАНТИИ =================
+# ================= ЭНДПОЙНТ ДЛЯ БАНКОВСКОЙ ГАРАНТИИ (с автоанализом и индикатором) =================
 @app.get("/guarantee", response_class=HTMLResponse)
 async def guarantee_page(request: Request):
     reg_number = request.query_params.get("regNumber")
     if not reg_number:
         return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
     
+    # Пытаемся получить данные из кэша
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
     
+    # Если кэша нет — выполняем анализ (с индикатором)
     if not cached:
-        print(f"ℹ️ Данных в кэше для {reg_number} нет. Форма будет пустой.")
+        print(f"🔍 Кэш для {reg_number} не найден, выполняем анализ...")
+        try:
+            text = fetch_tender_text_from_server(reg_number)
+            if text and len(text) > 100:
+                selected_fields = [
+                    "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+                    "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+                    "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+                ]
+                analysis_result = analyze_tender_text(text, selected_fields)
+                await database.save_analysis_cache(reg_number, analysis_result)
+                data = analysis_result
+                print(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш")
+            else:
+                print(f"⚠️ Не удалось извлечь текст для {reg_number}")
+        except Exception as e:
+            print(f"❌ Ошибка при анализе: {e}")
     
+    # Формируем HTML-форму с заполненными данными
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -525,12 +542,38 @@ async def guarantee_page(request: Request):
             .btn:hover {{ background: #d97706; }}
             .field {{ margin-bottom: 15px; }}
             .info {{ color: #666; font-size: 14px; margin-top: 10px; }}
-            .inline-label {{ display: flex; align-items: center; gap: 8px; font-weight: normal; }}
+            .inline-label {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-weight: normal;
+                justify-content: flex-start;
+                margin-top: 5px;
+            }}
+            .loader {{
+                border: 4px solid #f3f3f3;
+                border-top: 4px solid #f59e0b;
+                border-radius: 50%;
+                width: 30px;
+                height: 30px;
+                animation: spin 1s linear infinite;
+                margin: 20px auto;
+            }}
+            @keyframes spin {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+            .loading-text {{ text-align: center; color: #f59e0b; font-weight: bold; margin: 20px 0; }}
         </style>
     </head>
     <body>
         <h1>Заявка на банковскую гарантию</h1>
-        <form action="/api/guarantee/request" method="post">
+        <div id="loading" class="loading-text" style="display: {'none' if cached else 'block'};">
+            <div class="loader"></div>
+            Выполняется анализ печатной формы...<br>
+            <span style="font-weight: normal; font-size: 14px; color: #666;">Это может занять 10–15 секунд</span>
+        </div>
+        <form id="guaranteeForm" action="/api/guarantee/request" method="post" style="display: {'block' if cached else 'none'};">
             <input type="hidden" name="regNumber" value="{reg_number}">
             
             <div class="field">
@@ -577,17 +620,31 @@ async def guarantee_page(request: Request):
                 <label>Email</label>
                 <input type="email" name="email" placeholder="user@example.com" required>
             </div>
-            <div class="field">
-                <label class="inline-label">
-                    <input type="checkbox" name="contact_by_email" value="true">
-                    Не звонить мне, связываться только по email
-                </label>
+            <div class="field inline-label">
+                <input type="checkbox" name="contact_by_email" value="true">
+                <span>Не звонить мне, связываться только по email</span>
             </div>
             <button type="submit" class="btn">Отправить заявку</button>
         </form>
         <div style="margin-top: 20px; font-size: 13px; color: #666;">
             <a href="/">На главную</a>
         </div>
+        <script>
+            window.onload = function() {{
+                const loading = document.getElementById('loading');
+                const form = document.getElementById('guaranteeForm');
+                const cached = {'true' if cached else 'false'};
+                if (cached === 'true') {{
+                    loading.style.display = 'none';
+                    form.style.display = 'block';
+                }} else {{
+                    setTimeout(function() {{
+                        loading.style.display = 'none';
+                        form.style.display = 'block';
+                    }}, 15000);
+                }}
+            }};
+        </script>
     </body>
     </html>
     """
