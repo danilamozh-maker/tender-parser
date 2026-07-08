@@ -151,6 +151,10 @@ async def download_oferta():
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename="oferta.docx"
     )
+@app.get("/privacy-policy", response_class=HTMLResponse)
+async def privacy_policy_page():
+    with open("templates/privacy-policy.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 @app.get("/download-file/{filename}")
 async def download_file(filename: str):
