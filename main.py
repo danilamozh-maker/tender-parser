@@ -345,12 +345,12 @@ async def analyze_texts(request: Request, data: dict):
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
-    async def analyze_one(tender):
-        reg_number = tender.get("regNumber", "")
-        cached = await database.get_cached_analysis(reg_number)
-        if cached:
-            print(f"📦 Кэш для {reg_number} использован")
-            return {"url": tender.get("url", ""), "reg_number": reg_number, "analysis": cached}
+    cached = await database.get_cached_analysis(reg_number)
+    if cached:
+    # Увеличиваем счётчик использования кэша
+        await database.increment_cache_usage(reg_number)
+        print(f"📦 Кэш для {reg_number} использован (всего: {cached.get('used_count', 0)})")
+        return {"url": tender.get("url", ""), "reg_number": reg_number, "analysis": cached}
         tender_text = tender.get("text", "")
         if not tender_text or len(tender_text) < 100:
             return {"url": tender.get("url", ""), "reg_number": reg_number, "error": "Недостаточно текста"}
