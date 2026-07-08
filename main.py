@@ -86,8 +86,10 @@ async def send_max_notification(reg_number: str, client_name: str, phone: str, e
         "Authorization": MAX_BOT_TOKEN,
         "Content-Type": "application/json"
     }
+    # 1. Формируем URL с chat_id в качестве параметра
+    url_with_chat_id = f"{MAX_API_URL}?chat_id={MAX_CHAT_ID}"
+    
     payload = {
-        "chat_id": MAX_CHAT_ID, # строка
         "text": text,
         "format": "markdown"
     }
