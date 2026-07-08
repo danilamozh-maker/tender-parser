@@ -6,12 +6,8 @@ import json
 import time
 import asyncio
 import hashlib
-import smtplib
 from pathlib import Path
 from datetime import datetime
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.utils import formatdate
 from docx import Document
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
@@ -30,22 +26,14 @@ app = FastAPI()
 OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
 API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # замени на свой
 MODEL_NAME = "deepseek-chat"
-MAX_TENDERS = 50
+MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
+
 
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
 MERCHANT_LOGIN = "tender_parser_CSB" # замени
 PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
 PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
-# ============================================
-
-# ================= НАСТРОЙКИ SMTP (ЗАХАРДКОЖЕНЫ) =================
-SMTP_HOST = "smtp.yandex.ru"
-SMTP_PORT = 587 # STARTTLS
-SMTP_USER = "arsenyorloff@yandex.ru" # ЗАМЕНИ НА СВОЮ
-SMTP_PASSWORD = "lepfjuyayxtypjgu" # ЗАМЕНИ НА ПАРОЛЬ ПРИЛОЖЕНИЯ
-SMTP_RECIPIENT = "arsenyorloff@yandex.ru" # ЗАМЕНИ НА ПОЧТУ МЕНЕДЖЕРА
-SMTP_FROM = SMTP_USER # обычно та же, что и SMTP_USER
 # ============================================
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
@@ -71,53 +59,7 @@ async def check_access(request: Request):
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
-# ================= ОТПРАВКА ПИСЬМА (АСИНХРОННАЯ, ПОРТ 587) =================
-async def send_guarantee_email(data: dict):
-    """
-    Отправляет заявку на банковскую гарантию по email (асинхронно, через STARTTLS).
-    """
-    if not SMTP_USER or not SMTP_PASSWORD or not SMTP_RECIPIENT:
-        print("⚠️ SMTP не настроен (пропущена отправка письма)")
-        return
-
-    subject = f"Новая заявка на банковскую гарантию (тендер {data.get('regNumber', '')})"
-    
-    body = f"""
-    Поступила новая заявка на банковскую гарантию.
-
-    Номер тендера: {data.get('regNumber', 'Не указан')}
-    Тип гарантии: {data.get('guaranteeType', 'Не указан')}
-    Начальная цена (НМЦ): {data.get('nmc', 'Не указана')}
-    Дата окончания контракта: {data.get('endDate', 'Не указана')}
-    Дата окончания подачи заявок: {data.get('bidEndDate', 'Не указана')}
-
-    Данные клиента:
-    Имя: {data.get('clientName', 'Не указано')}
-    Телефон: {data.get('phone', 'Не указан')}
-    Email: {data.get('email', 'Не указан')}
-    Комментарий: {data.get('comment', 'Нет')}
-    """
-
-    msg = MIMEMultipart()
-    msg['From'] = SMTP_FROM
-    msg['To'] = SMTP_RECIPIENT
-    msg['Subject'] = subject
-    msg['Date'] = formatdate(localtime=True)
-    msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-    def send_sync():
-        try:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-                server.starttls()
-                server.login(SMTP_USER, SMTP_PASSWORD)
-                server.sendmail(SMTP_FROM, SMTP_RECIPIENT, msg.as_string())
-            print("✅ Письмо с заявкой отправлено (порт 587, STARTTLS)")
-        except Exception as e:
-            print(f"❌ Ошибка отправки письма: {e}")
-
-    await asyncio.to_thread(send_sync)
-
-# ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ С СЕРВЕРА =================
+# ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ =================
 def fetch_tender_text_from_server(reg_number: str, type: str = "44") -> str:
     """
     Загружает печатную форму тендера с zakupki.gov.ru и извлекает текст.
@@ -194,7 +136,6 @@ async def download_file(filename: str):
 async def download_redirect():
     return RedirectResponse(url="/", status_code=302)
 
-# ================= UPDATES.XML =================
 @app.get("/updates.xml")
 async def updates_xml():
     file_path = os.path.join(os.path.dirname(__file__), "updates.xml")
@@ -572,21 +513,18 @@ async def guarantee_page(request: Request):
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
     
-    # Если кэша нет — выполняем анализ
+    # Если кэша нет — выполняем анализ (даже если он упадёт, форма всё равно откроется)
     if not cached:
         print(f"🔍 Кэш для {reg_number} не найден, выполняем анализ...")
         try:
-            # 1. Получаем текст печатной формы
             text = fetch_tender_text_from_server(reg_number)
             if text and len(text) > 100:
-                # 2. Анализируем через DeepSeek
                 selected_fields = [
                     "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
                     "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
                     "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
                 ]
                 analysis_result = analyze_tender_text(text, selected_fields)
-                # 3. Сохраняем в кэш
                 await database.save_analysis_cache(reg_number, analysis_result)
                 data = analysis_result
                 print(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш")
@@ -595,7 +533,7 @@ async def guarantee_page(request: Request):
         except Exception as e:
             print(f"❌ Ошибка при анализе: {e}")
     
-    # Формируем HTML-форму с заполненными данными
+    # Формируем HTML-форму с заполненными данными (или пустую)
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -704,23 +642,7 @@ async def guarantee_request(
     except Exception as e:
         print(f"❌ Ошибка сохранения в БД: {e}")
 
-    # 2. Отправляем письмо в фоне (не блокируем ответ)
-    data = {
-        "regNumber": regNumber,
-        "nmc": nmc,
-        "endDate": endDate,
-        "bidEndDate": bidEndDate,
-        "bidSecurity": bidSecurity,
-        "contractSecurity": contractSecurity,
-        "guaranteeType": guaranteeType,
-        "clientName": clientName,
-        "phone": phone,
-        "email": email,
-        "comment": comment
-    }
-    asyncio.create_task(send_guarantee_email(data))
-
-    # 3. Возвращаем страницу успеха
+    # 2. Возвращаем страницу успеха (без писем)
     return HTMLResponse("""
     <!DOCTYPE html>
     <html>
