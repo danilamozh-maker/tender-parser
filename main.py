@@ -510,7 +510,7 @@ async def guarantee_page(request: Request):
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
     
-    # Формируем HTML-форму с заполненными данными (если есть)
+    # Формируем HTML-форму с заполненными данными (исправленный чекбокс)
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -519,19 +519,29 @@ async def guarantee_page(request: Request):
         <title>Заявка на банковскую гарантию</title>
         <style>
             body {{ font-family: Arial; padding: 20px; max-width: 600px; margin: auto; }}
-            label {{ display: block; margin-top: 10px; font-weight: bold; }}
-            input, select {{ width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px; }}
-            .btn {{ background: #f59e0b; color: white; border: none; padding: 12px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 20px; }}
+            label {{ display: block; margin-top: 8px; font-weight: bold; font-size: 14px; }}
+            input, select {{ width: 100%; padding: 6px; margin-top: 2px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }}
+            .btn {{ background: #f59e0b; color: white; border: none; padding: 10px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 16px; }}
             .btn:hover {{ background: #d97706; }}
-            .field {{ margin-bottom: 15px; }}
+            .field {{ margin-bottom: 12px; }}
             .info {{ color: #666; font-size: 14px; margin-top: 10px; }}
             .inline-label {{
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                font-weight: normal;
+                margin: 6px 0 12px 0;
                 justify-content: flex-start;
-                margin-top: 5px;
+                font-weight: normal;
+            }}
+            .inline-label input[type="checkbox"] {{
+                width: 16px;
+                height: 16px;
+                margin: 0;
+                flex-shrink: 0;
+            }}
+            .inline-label span {{
+                font-size: 13px;
+                color: #1e293b;
             }}
         </style>
     </head>
@@ -584,7 +594,8 @@ async def guarantee_page(request: Request):
                 <label>Email</label>
                 <input type="email" name="email" placeholder="user@example.com" required>
             </div>
-            <div class="field inline-label">
+            <!-- Исправленный чекбокс: выровнен влево, текст рядом -->
+            <div class="inline-label">
                 <input type="checkbox" name="contact_by_email" value="true">
                 <span>Не звонить мне, связываться только по email</span>
             </div>
