@@ -29,7 +29,7 @@ app = FastAPI()
 # ================= НАСТРОЙКИ OPENROUTER =================
 OLLAMA_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 API_KEY = "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"
-MODEL_NAME = "google/gemini-2.0-flash-exp:free" # или другую бесплатную модель
+MODEL_NAME = "microsoft/phi-3-mini-128k-instruct:free" # или другую бесплатную модель
 # ========================================================
 MAX_TENDERS = 15
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
