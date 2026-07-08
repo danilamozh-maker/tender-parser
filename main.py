@@ -59,34 +59,6 @@ async def check_access(request: Request):
             return True
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
-# ================= ЗАГРУЗКА ПЕЧАТНОЙ ФОРМЫ (С ЛОГИРОВАНИЕМ) =================
-def fetch_tender_text_from_server(reg_number: str, type: str = "44") -> str:
-    if type == "44":
-        # Используем view.html, как в расширении
-        url = f"https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber={reg_number}"
-    elif type == "223":
-        url = f"https://zakupki.gov.ru/epz/order/notice/notice223/printForm/view.html?regNumber={reg_number}"
-    else:
-        return ""
-    print(f"📥 Загружаем печатную форму: {url}")
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        for selector in ['.print-form-content', '.notice-body', '.content', '.view-content', '.main-content', 'body']:
-            el = soup.select_one(selector)
-            if el:
-                text = el.get_text(separator='\n', strip=True)
-                if len(text) > 100:
-                    print(f"📄 Текст загружен, длина: {len(text)}")
-                    return text
-        text = soup.body.get_text(separator='\n', strip=True) if soup.body else ""
-        print(f"📄 Текст из body, длина: {len(text)}")
-        return text
-    except Exception as e:
-        print(f"❌ Ошибка при загрузке печатной формы: {e}")
-        return ""
-
 # ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/health")
 async def health():
@@ -502,7 +474,32 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТ ДЛЯ БАНКОВСКОЙ ГАРАНТИИ (с автоанализом и индикатором) =================
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКСТА ДЛЯ ГАРАНТИИ (ПРИНИМАЕТ ТЕКСТ ИЗ РАСШИРЕНИЯ) =================
+@app.post("/api/guarantee/analyze")
+async def guarantee_analyze(request: Request, data: dict):
+    await check_access(request)
+    
+    reg_number = data.get("regNumber")
+    text = data.get("text", "")
+    selected_fields = data.get("fields", [])
+    
+    if not reg_number or not text or len(text) < 100:
+        raise HTTPException(400, "Недостаточно данных для анализа")
+    
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+    
+    analysis_result = analyze_tender_text(text, selected_fields)
+    await database.save_analysis_cache(reg_number, analysis_result)
+    print(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш (запрос из гарантии)")
+    
+    return {"status": "ok", "reg_number": reg_number}
+
+# ================= ЭНДПОЙНТ ДЛЯ СТРАНИЦЫ ГАРАНТИИ (только показ формы) =================
 @app.get("/guarantee", response_class=HTMLResponse)
 async def guarantee_page(request: Request):
     reg_number = request.query_params.get("regNumber")
@@ -513,27 +510,7 @@ async def guarantee_page(request: Request):
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
     
-    # Если кэша нет — выполняем анализ (с индикатором)
-    if not cached:
-        print(f"🔍 Кэш для {reg_number} не найден, выполняем анализ...")
-        try:
-            text = fetch_tender_text_from_server(reg_number)
-            if text and len(text) > 100:
-                selected_fields = [
-                    "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
-                    "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
-                    "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
-                ]
-                analysis_result = analyze_tender_text(text, selected_fields)
-                await database.save_analysis_cache(reg_number, analysis_result)
-                data = analysis_result
-                print(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш")
-            else:
-                print(f"⚠️ Не удалось извлечь текст для {reg_number}")
-        except Exception as e:
-            print(f"❌ Ошибка при анализе: {e}")
-    
-    # Формируем HTML-форму с заполненными данными
+    # Формируем HTML-форму с заполненными данными (если есть)
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -556,30 +533,11 @@ async def guarantee_page(request: Request):
                 justify-content: flex-start;
                 margin-top: 5px;
             }}
-            .loader {{
-                border: 4px solid #f3f3f3;
-                border-top: 4px solid #f59e0b;
-                border-radius: 50%;
-                width: 30px;
-                height: 30px;
-                animation: spin 1s linear infinite;
-                margin: 20px auto;
-            }}
-            @keyframes spin {{
-                0% {{ transform: rotate(0deg); }}
-                100% {{ transform: rotate(360deg); }}
-            }}
-            .loading-text {{ text-align: center; color: #f59e0b; font-weight: bold; margin: 20px 0; }}
         </style>
     </head>
     <body>
         <h1>Заявка на банковскую гарантию</h1>
-        <div id="loading" class="loading-text" style="display: {'none' if cached else 'block'};">
-            <div class="loader"></div>
-            Выполняется анализ печатной формы...<br>
-            <span style="font-weight: normal; font-size: 14px; color: #666;">Это может занять 10–15 секунд</span>
-        </div>
-        <form id="guaranteeForm" action="/api/guarantee/request" method="post" style="display: {'block' if cached else 'none'};">
+        <form id="guaranteeForm" action="/api/guarantee/request" method="post">
             <input type="hidden" name="regNumber" value="{reg_number}">
             
             <div class="field">
@@ -635,22 +593,6 @@ async def guarantee_page(request: Request):
         <div style="margin-top: 20px; font-size: 13px; color: #666;">
             <a href="/">На главную</a>
         </div>
-        <script>
-            window.onload = function() {{
-                const loading = document.getElementById('loading');
-                const form = document.getElementById('guaranteeForm');
-                const cached = {'true' if cached else 'false'};
-                if (cached === 'true') {{
-                    loading.style.display = 'none';
-                    form.style.display = 'block';
-                }} else {{
-                    setTimeout(function() {{
-                        loading.style.display = 'none';
-                        form.style.display = 'block';
-                    }}, 15000);
-                }}
-            }};
-        </script>
     </body>
     </html>
     """
