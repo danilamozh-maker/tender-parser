@@ -12,3 +12,6 @@ lxml
 pdfplumber
 asyncpg
 httpx
+python-dotenv
+slowapi
+pydantic
