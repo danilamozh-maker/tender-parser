@@ -6,13 +6,17 @@ import json
 import time
 import asyncio
 import hashlib
+import logging
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 from docx import Document
 import requests
 import httpx
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from urllib.parse import quote
 import openpyxl
 import xlrd
@@ -21,37 +25,119 @@ import database
 import parser
 from bs4 import BeautifulSoup
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, validator
+from typing import List, Optional
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
-app = FastAPI()
+# ================= ЗАГРУЗКА .ENV =================
+load_dotenv()
+
+# ================= ЛОГИРОВАНИЕ =================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ================= НАСТРОЙКИ =================
+API_KEY = os.getenv("DEEPSEEK_API_KEY")
+if not API_KEY:
+    raise ValueError("DEEPSEEK_API_KEY не найден в .env")
+
 OLLAMA_API_URL = "https://api.deepseek.com/v1/chat/completions"
-API_KEY = "sk-a1866f43ed134eb48d617185cda7cd56" # замени на свой
 MODEL_NAME = "deepseek-chat"
 MAX_TENDERS = 15
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "ваш_секретный_токен")
-
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
+if not ADMIN_TOKEN:
+    raise ValueError("ADMIN_TOKEN не найден в .env")
 
 # ================= НАСТРОЙКИ РОБОКАССЫ =================
-MERCHANT_LOGIN = "tender_parser_CSB" # замени
-PASSWORD_1 = "mw0UTf9BTA3g6Y0ZnTWw" # замени
-PASSWORD_2 = "VZqLWxvWV8ii8G7rS9h7" # замени
-# ============================================
+MERCHANT_LOGIN = os.getenv("ROBOKASSA_LOGIN")
+PASSWORD_1 = os.getenv("ROBOKASSA_PASS1")
+PASSWORD_2 = os.getenv("ROBOKASSA_PASS2")
+
+if not all([MERCHANT_LOGIN, PASSWORD_1, PASSWORD_2]):
+    raise ValueError("ROBOKASSA настройки не найдены в .env")
 
 # ================= НАСТРОЙКИ MAX BOT =================
-MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "f9LHodD0cOJJR4mfk6UzbouO5cyuuYI5UvehN38OyoPbpI4wdbQc7nuXOq1jU7JZJ9vgJgpNR-tvkOdnUcFX")
-MAX_CHAT_ID = os.getenv("MAX_CHAT_ID", "-76698561483332") # строка
+MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")
+MAX_CHAT_ID = os.getenv("MAX_CHAT_ID")
 MAX_API_URL = "https://platform-api2.max.ru/messages"
-# =====================================================
+
+if not all([MAX_BOT_TOKEN, MAX_CHAT_ID]):
+    raise ValueError("MAX BOT настройки не найдены в .env")
+
+# ================= FASTAPI + RATE LIMITING =================
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ================= CORS =================
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["chrome-extension://*"], # Укажите точный ID расширения
+    allow_credentials=True,
+    allow_methods=["POST", "GET"],
+    allow_headers=["X-License-Key", "X-Device-ID", "Content-Type"],
+)
+
+# ================= TRUSTED HOSTS =================
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["your-domain.com", "*.your-domain.com", "localhost"]
+)
+
+# ================= MIDDLEWARE ЛОГИРОВАНИЯ =================
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = time.time() - start
+    logger.info(
+        f"{request.method} {request.url.path} - {response.status_code} - "
+        f"{duration:.2f}s - {request.client.host} - "
+        f"License: {request.headers.get('X-License-Key', 'none')[:8]}..."
+    )
+    return response
+
+# ================= PYDANTIC МОДЕЛИ =================
+class TenderData(BaseModel):
+    url: str = Field(..., max_length=500)
+    regNumber: str = Field(..., max_length=50)
+    text: str = Field(..., max_length=50000)
+
+    @validator('url')
+    def validate_url(cls, v):
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError('URL должен начинаться с http:// или https://')
+        return v
+
+class AnalyzeRequest(BaseModel):
+    tenders: List[TenderData] = Field(..., max_items=50)
+    fields: List[str] = Field(default_factory=list, max_items=20)
+
+class TrialRequest(BaseModel):
+    device_id: str = Field(..., min_length=10, max_length=100)
+
+class LicenseActivateRequest(BaseModel):
+    key: str = Field(..., min_length=10, max_length=100)
 
 # ================= ИНИЦИАЛИЗАЦИЯ БД =================
 @app.on_event("startup")
 async def startup():
     try:
         await database.init_db()
-        print("✅ База данных PostgreSQL инициализирована")
+        logger.info("✅ База данных PostgreSQL инициализирована")
     except Exception as e:
-        print(f"❌ Ошибка инициализации БД: {e}")
+        logger.error(f"❌ Ошибка инициализации БД: {e}")
+        raise
 
 # ================= ПРОВЕРКА ДОСТУПА =================
 async def check_access(request: Request):
@@ -59,15 +145,18 @@ async def check_access(request: Request):
     if license_key:
         result = await database.verify_license(license_key)
         if result and result.get("valid"):
-            return True
+            return {"type": "license", "id": license_key}
+    
     device_id = request.headers.get("X-Device-ID")
     if device_id:
         is_active = await database.check_trial_by_device(device_id)
         if is_active:
-            return True
+            return {"type": "trial", "id": device_id}
+    
+    logger.warning(f"Unauthorized access attempt from {request.client.host}")
     raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
 
-# ================= ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЯ В MAX (ВСЕ ПОЛЯ) =================
+# ================= ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЯ В MAX =================
 async def send_max_notification(
     reg_number: str,
     client_name: str,
@@ -82,9 +171,8 @@ async def send_max_notification(
     guarantee_type: str,
     contact_by_email: bool
 ):
-    """Отправляет полное уведомление о новой заявке в мессенджер MAX."""
     if not MAX_BOT_TOKEN or not MAX_CHAT_ID:
-        print("⚠️ MAX Bot не настроен: пропуск уведомления")
+        logger.warning("MAX Bot не настроен: пропуск уведомления")
         return
 
     text = (
@@ -112,14 +200,14 @@ async def send_max_notification(
     payload = {"text": text}
 
     try:
-        async with httpx.AsyncClient(verify=False) as client:
-            response = await client.post(url, headers=headers, json=payload, timeout=10)
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(url, headers=headers, json=payload)
             if response.status_code == 200:
-                print(f"✅ Уведомление в MAX отправлено (тендер {reg_number})")
+                logger.info(f"✅ Уведомление в MAX отправлено (тендер {reg_number})")
             else:
-                print(f"❌ Ошибка MAX API: {response.status_code} - {response.text}")
+                logger.error(f"❌ Ошибка MAX API: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"❌ Исключение при отправке в MAX: {e}")
+        logger.error(f"❌ Исключение при отправке в MAX: {e}")
 
 # ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/health")
@@ -152,6 +240,7 @@ async def download_oferta():
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename="oferta.docx"
     )
+
 @app.get("/privacy-policy", response_class=HTMLResponse)
 async def privacy_policy_page():
     with open("templates/privacy-policy.html", "r", encoding="utf-8") as f:
@@ -165,10 +254,7 @@ async def download_file(filename: str):
     file_path = os.path.join(os.path.dirname(__file__), filename)
     if not os.path.exists(file_path):
         raise HTTPException(404, "Файл не найден на сервере")
-    if filename.endswith(".crx"):
-        media_type = "application/x-chrome-extension"
-    else:
-        media_type = "application/zip"
+    media_type = "application/x-chrome-extension" if filename.endswith(".crx") else "application/zip"
     return FileResponse(file_path, media_type=media_type, filename=filename)
 
 @app.get("/download")
@@ -184,7 +270,8 @@ async def updates_xml():
 
 # ================= ЭНДПОЙНТЫ РОБОКАССЫ =================
 @app.post("/api/create-payment")
-async def create_payment():
+@limiter.limit("5/minute")
+async def create_payment(request: Request):
     inv_id = int(datetime.now().timestamp())
     amount = 2500
     signature = hashlib.md5(
@@ -200,6 +287,7 @@ async def create_payment():
     }
 
 @app.post("/robokassa/result")
+@limiter.limit("10/minute")
 async def robokassa_result(request: Request):
     form = await request.form()
     data = dict(form)
@@ -208,6 +296,7 @@ async def robokassa_result(request: Request):
     signature = data.get("SignatureValue")
     expected = hashlib.md5(f"{out_sum}:{inv_id}:{PASSWORD_2}".encode()).hexdigest()
     if signature.lower() != expected.lower():
+        logger.warning(f"Invalid Robokassa signature from {request.client.host}")
         raise HTTPException(400, "Invalid signature")
     return f"OK{inv_id}"
 
@@ -228,9 +317,11 @@ async def robokassa_success(request: Request):
 
 # ================= ЛИЦЕНЗИИ =================
 @app.post("/api/create-order")
+@limiter.limit("10/minute")
 async def create_order(request: Request):
     admin_token = request.headers.get("X-Admin-Token")
     if admin_token != ADMIN_TOKEN:
+        logger.warning(f"Invalid admin token from {request.client.host}")
         raise HTTPException(403, "Invalid admin token")
     license_key = await database.create_license(days_valid=30)
     if not license_key:
@@ -377,45 +468,48 @@ def analyze_tender_text(text, selected_fields, license_key=None, device_id=None)
 
 # ================= ЭНДПОЙНТ АНАЛИЗА ТЕНДЕРОВ =================
 @app.post("/analyze_texts")
-async def analyze_texts(request: Request, data: dict):
+@limiter.limit("10/minute")
+async def analyze_texts(request: Request, data: AnalyzeRequest):
     await check_access(request)
-    tenders_data = data.get("tenders", [])
+    tenders_data = data.tenders
     if not tenders_data:
         raise HTTPException(400, "Нет данных для анализа")
-    selected_fields = data.get("fields", [])
+    
+    selected_fields = data.fields
     if not selected_fields:
         selected_fields = [
             "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
             "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
+    
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
     async def analyze_one(tender):
-        reg_number = tender.get("regNumber", "")
+        reg_number = tender.regNumber
         cached = await database.get_cached_analysis(reg_number)
         if cached:
             await database.increment_cache_usage(reg_number)
-            print(f"📦 Кэш для {reg_number} использован (счётчик увеличен)")
+            logger.info(f"📦 Кэш для {reg_number} использован")
             return {
-                "url": tender.get("url", ""),
+                "url": tender.url,
                 "reg_number": reg_number,
                 "analysis": cached
             }
-        tender_text = tender.get("text", "")
+        tender_text = tender.text
         if not tender_text or len(tender_text) < 100:
             return {
-                "url": tender.get("url", ""),
+                "url": tender.url,
                 "reg_number": reg_number,
                 "error": "Недостаточно текста для анализа"
             }
         start = time.time()
         analysis_result = analyze_tender_text(tender_text, selected_fields, license_key, device_id)
         await database.save_analysis_cache(reg_number, analysis_result)
-        print(f"⏱️ DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек (сохранён в кэш)")
+        logger.info(f"⏱️ DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек")
         return {
-            "url": tender.get("url", ""),
+            "url": tender.url,
             "reg_number": reg_number,
             "analysis": analysis_result
         }
@@ -480,13 +574,24 @@ def detect_file_type(content: bytes) -> str:
     return 'unknown'
 
 @app.post("/package_files")
+@limiter.limit("10/minute")
 async def package_files(request: Request, files: list[UploadFile] = File(...), analysis_text: str = Form("")):
     await check_access(request)
     if not files:
         raise HTTPException(400, "Нет файлов")
+    if len(files) > 100:
+        raise HTTPException(400, "Слишком много файлов (макс. 100)")
+    
     tenders = {}
+    total_size = 0
+    max_total_size = 500 * 1024 * 1024 # 500 MB
+    
     for file in files:
         content = await file.read()
+        total_size += len(content)
+        if total_size > max_total_size:
+            raise HTTPException(400, "Общий размер файлов превышает 500 МБ")
+        
         parts = file.filename.split('_', 1)
         tender_id = parts[0] if len(parts) == 2 else "без_тендера"
         original_name = parts[1] if len(parts) == 2 else file.filename
@@ -503,8 +608,9 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
         else:
             if '.' not in original_name:
                 original_name = base + '.bin'
-        print(f"🔍 Тип: {file_type}, имя: {original_name}")
+        logger.info(f"🔍 Тип: {file_type}, имя: {original_name}")
         tenders.setdefault(tender_id, []).append((original_name, content))
+    
     for tender_id, file_list in tenders.items():
         seen = set()
         new_list = []
@@ -518,6 +624,7 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
             seen.add(new_name)
             new_list.append((new_name, content))
         tenders[tender_id] = new_list
+    
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zf:
         for tender_id, file_list in tenders.items():
@@ -537,6 +644,7 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
             doc.save(word_buf)
             word_buf.seek(0)
             zf.writestr("анализ_тендеров.docx", word_buf.getvalue())
+    
     zip_buffer.seek(0)
     filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded = quote(filename)
@@ -544,6 +652,7 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
 
 # ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКСТА ДЛЯ ГАРАНТИИ =================
 @app.post("/api/guarantee/analyze")
+@limiter.limit("10/minute")
 async def guarantee_analyze(request: Request, data: dict):
     await check_access(request)
     reg_number = data.get("regNumber")
@@ -559,15 +668,20 @@ async def guarantee_analyze(request: Request, data: dict):
         ]
     analysis_result = analyze_tender_text(text, selected_fields)
     await database.save_analysis_cache(reg_number, analysis_result)
-    print(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш (запрос из гарантии)")
+    logger.info(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш")
     return {"status": "ok", "reg_number": reg_number}
 
-# ================= ЭНДПОЙНТ ДЛЯ СТРАНИЦЫ ГАРАНТИИ (С ИНН И ЧЕКБОКСАМИ) =================
+# ================= ЭНДПОЙНТ ДЛЯ СТРАНИЦЫ ГАРАНТИИ =================
 @app.get("/guarantee", response_class=HTMLResponse)
 async def guarantee_page(request: Request):
     reg_number = request.query_params.get("regNumber")
     if not reg_number:
         return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
+    
+    # Валидация reg_number
+    if not reg_number.replace('-', '').replace('/', '').isalnum():
+        raise HTTPException(400, "Некорректный номер тендера")
+    
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
 
@@ -628,7 +742,7 @@ async def guarantee_page(request: Request):
         <h1>Заявка на банковскую гарантию</h1>
         <form id="guaranteeForm" action="/api/guarantee/request" method="post">
             <input type="hidden" name="regNumber" value="{reg_number}">
-            
+           
             <div class="field">
                 <label>Номер тендера</label>
                 <input type="text" value="{reg_number}" readonly>
@@ -682,7 +796,6 @@ async def guarantee_page(request: Request):
                 <span>Не звонить мне, связываться только по email</span>
             </div>
 
-            <!-- БЛОК СОГЛАСИЙ (ИСПРАВЛЕНО: добавлены name) -->
             <div class="consent-block">
                 <label>
                     <input type="checkbox" id="consent_personal" name="consent_personal" required>
@@ -721,9 +834,11 @@ async def guarantee_page(request: Request):
     """
     return HTMLResponse(content=html)
 
-# ================= ЭНДПОЙНТ ПРИЁМА ЗАЯВКИ (С ИНН И СОГЛАСИЯМИ) =================
+# ================= ЭНДПОЙНТ ПРИЁМА ЗАЯВКИ =================
 @app.post("/api/guarantee/request")
+@limiter.limit("5/minute")
 async def guarantee_request(
+    request: Request,
     regNumber: str = Form(...),
     nmc: str = Form(""),
     endDate: str = Form(""),
@@ -742,20 +857,28 @@ async def guarantee_request(
     # Проверка согласий
     if not consent_personal or not consent_terms:
         raise HTTPException(400, "Необходимо дать согласие на обработку персональных данных и принять условия")
+    
+    # Валидация ИНН
+    inn_clean = inn.replace(' ', '').replace('-', '')
+    if not inn_clean.isdigit() or len(inn_clean) not in [10, 12]:
+        raise HTTPException(400, "Некорректный ИНН")
+    
+    # Валидация email
+    if '@' not in email or '.' not in email.split('@')[1]:
+        raise HTTPException(400, "Некорректный email")
 
     try:
         pool = await database.get_pool()
         async with pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO guarantee_requests 
-                (reg_number, nmc, end_date, bid_end_date, guarantee_type, 
+                INSERT INTO guarantee_requests
+                (reg_number, nmc, end_date, bid_end_date, guarantee_type,
                  client_name, inn, phone, email, bid_security, contract_security, contact_by_email)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             """, regNumber, nmc, endDate, bidEndDate, guaranteeType,
                 clientName, inn, phone, email, bidSecurity, contractSecurity, contact_by_email)
-        print(f"✅ Заявка для тендера {regNumber} сохранена в БД")
+        logger.info(f"✅ Заявка для тендера {regNumber} сохранена в БД")
 
-        # ===== ОТПРАВКА УВЕДОМЛЕНИЯ В MAX (ВСЕ ПОЛЯ) =====
         asyncio.create_task(
             send_max_notification(
                 reg_number=regNumber,
@@ -774,7 +897,7 @@ async def guarantee_request(
         )
 
     except Exception as e:
-        print(f"❌ Ошибка сохранения в БД: {e}")
+        logger.error(f"❌ Ошибка сохранения в БД: {e}")
         raise HTTPException(500, "Ошибка при сохранении заявки")
 
     return HTMLResponse("""
@@ -793,54 +916,62 @@ async def guarantee_request(
 
 # ================= ПРОБНЫЙ ПЕРИОД =================
 @app.post("/api/trial/start")
-async def start_trial(request: Request, data: dict):
-    device_id = data.get("device_id")
-    if not device_id:
-        raise HTTPException(400, "device_id не указан")
+@limiter.limit("3/hour")
+async def start_trial(request: Request, data: TrialRequest):
+    device_id = data.device_id
     ip_address = request.client.host
     user_agent = request.headers.get("User-Agent")
     result = await database.start_trial(device_id, trial_days=2, ip_address=ip_address, user_agent=user_agent)
     return result
 
 @app.post("/api/trial/status")
-async def check_trial(data: dict):
-    device_id = data.get("device_id")
-    if not device_id:
-        raise HTTPException(400, "device_id не указан")
-    result = await database.get_trial_status(device_id)
+@limiter.limit("10/minute")
+async def check_trial(data: TrialRequest):
+    result = await database.get_trial_status(data.device_id)
     return result
 
 # ================= ОСТАЛЬНЫЕ ЭНДПОЙНТЫ =================
 @app.post("/search_tenders")
+@limiter.limit("5/minute")
 async def search_tenders(request: Request, data: dict):
     await check_access(request)
     query = data.get("query", "").strip()
     limit = data.get("limit", MAX_TENDERS)
     if not query:
         raise HTTPException(400, "Введите ключевые слова для поиска")
+    if len(query) > 200:
+        raise HTTPException(400, "Запрос слишком длинный")
+    
     tender_urls = parser.search_tenders_zakupki(query, limit)
     if not tender_urls:
         return {"detail": "Тендеры по вашему запросу не найдены"}
+    
     base_dir = f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(base_dir, exist_ok=True)
     results = []
-    for idx, tender_url in enumerate(tender_urls[:MAX_TENDERS], 1):
-        tender_name = f"Тендер_{idx}"
-        tender_dir = os.path.join(base_dir, tender_name)
-        os.makedirs(tender_dir, exist_ok=True)
-        files = parser.download_files_from_tender(tender_url, tender_dir)
-        if files:
-            combined_text = ""
-            for file_path in files:
-                text = read_docx(file_path) if file_path.endswith('.docx') else read_txt(file_path) if file_path.endswith('.txt') else read_excel(file_path)
-                if text and not text.startswith("Ошибка"):
-                    combined_text += text + "\n"
-            results.append({
-                "tender_name": tender_name,
-                "files": files,
-                "text": combined_text[:5000]
-            })
-        time.sleep(2)
+    
+    try:
+        for idx, tender_url in enumerate(tender_urls[:MAX_TENDERS], 1):
+            tender_name = f"Тендер_{idx}"
+            tender_dir = os.path.join(base_dir, tender_name)
+            os.makedirs(tender_dir, exist_ok=True)
+            files = parser.download_files_from_tender(tender_url, tender_dir)
+            if files:
+                combined_text = ""
+                for file_path in files:
+                    text = read_docx(file_path) if file_path.endswith('.docx') else read_txt(file_path) if file_path.endswith('.txt') else read_excel(file_path)
+                    if text and not text.startswith("Ошибка"):
+                        combined_text += text + "\n"
+                results.append({
+                    "tender_name": tender_name,
+                    "files": files,
+                    "text": combined_text[:5000]
+                })
+            await asyncio.sleep(2)
+    finally:
+        if os.path.exists(base_dir):
+            shutil.rmtree(base_dir, ignore_errors=True)
+    
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zf:
         for res in results:
@@ -853,19 +984,22 @@ async def search_tenders(request: Request, data: dict):
             doc.save(word_buf)
             word_buf.seek(0)
             zf.writestr(f"{res['tender_name']}_результат.docx", word_buf.getvalue())
+    
     zip_buffer.seek(0)
     filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded = quote(filename)
-    if os.path.exists(base_dir):
-        shutil.rmtree(base_dir)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
 @app.post("/suggest_keywords")
+@limiter.limit("10/minute")
 async def suggest_keywords(request: Request, data: dict):
     await check_access(request)
     description = data.get("description", "").strip()
     if not description:
         raise HTTPException(400, "Описание не может быть пустым")
+    if len(description) > 1000:
+        raise HTTPException(400, "Описание слишком длинное")
+    
     prompt = f"""Ты — помощник по тендерам. Пользователь описал свою деятельность:
 "{description}"
 Выдели 5–7 ключевых слов для поиска тендеров на zakupki.gov.ru.
@@ -876,19 +1010,24 @@ async def suggest_keywords(request: Request, data: dict):
     return {"keywords": keywords[:7]}
 
 @app.post("/ask_ai")
+@limiter.limit("10/minute")
 async def ask_ai(request: Request, data: dict):
     await check_access(request)
     question = data.get("question", "").strip()
     if not question:
         raise HTTPException(400, "Введите вопрос")
+    if len(question) > 1000:
+        raise HTTPException(400, "Вопрос слишком длинный")
+    
     prompt = f"""Ты — консультант по тендерам и бизнес-процессам. Ответь на вопрос пользователя чётко, по делу, без воды.
 Вопрос пользователя: {question}
-Дай ответ в виде текста (2-4 предложения), который будет полезен для бизнеса."""
+Дай ответ в виде текста (2-4 предложения), который будет полезен для бизнесу."""
     answer = query_deepseek(prompt)
     return {"answer": answer}
 
 # ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
 @app.post("/api/verify-license")
+@limiter.limit("10/minute")
 async def verify_license_endpoint(request: Request):
     try:
         await check_access(request)
@@ -897,16 +1036,17 @@ async def verify_license_endpoint(request: Request):
         return {"valid": False, "reason": "Unauthorized"}
 
 @app.post("/api/activate-license")
-async def activate_license(data: dict):
-    key = data.get("key")
-    if not key:
-        raise HTTPException(400, "Ключ не указан")
-    result = await database.verify_and_activate_license(key)
+@limiter.limit("5/minute")
+async def activate_license(request: Request, data: LicenseActivateRequest):
+    result = await database.verify_and_activate_license(data.key)
     if not result["valid"]:
+        logger.warning(f"Failed license activation attempt: {data.key[:8]}... from {request.client.host}")
         return {"valid": False, "reason": result["reason"]}
+    logger.info(f"License activated: {data.key[:8]}...")
     return {"valid": True, "expires_at": result["expires_at"]}
 
 # ================= ЗАПУСК =================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
