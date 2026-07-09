@@ -100,10 +100,11 @@ async def log_requests(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
     duration = time.time() - start
+    license_header = request.headers.get("X-License-Key", "none")
     logger.info(
         f"{request.method} {request.url.path} - {response.status_code} - "
         f"{duration:.2f}s - {request.client.host} - "
-        f"License: {request.headers.get(\'X-License-Key\', \'none\')[:8]}..."
+        f"License: {license_header[:8]}..."
     )
     return response
 
@@ -113,10 +114,10 @@ class TenderData(BaseModel):
     regNumber: str = Field(..., max_length=50)
     text: str = Field(..., max_length=50000)
 
-    @validator(\'url\')
+    @validator("url")
     def validate_url(cls, v):
-        if not v.startswith((\'http://\', \'https://\')):
-            raise ValueError(\'URL должен начинаться с http:// или https://\')
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("URL должен начинаться с http:// или https://")
         return v
 
 class AnalyzeRequest(BaseModel):
@@ -134,9 +135,9 @@ class LicenseActivateRequest(BaseModel):
 async def startup():
     try:
         await database.init_db()
-        logger.info("✅ База данных PostgreSQL инициализирована")
+        logger.info("База данных PostgreSQL инициализирована")
     except Exception as e:
-        logger.error(f"❌ Ошибка инициализации БД: {e}")
+        logger.error(f"Ошибка инициализации БД: {e}")
         raise
 
 # ================= ПРОВЕРКА ДОСТУПА =================
@@ -153,8 +154,8 @@ async def check_access(request: Request):
         if is_active:
             return {"type": "trial", "id": device_id}
     
-    logger.warning(f"Unauthorized access attempt from {request.client.host}")
-    raise HTTPException(401, detail="Unauthorized: valid license or active trial required")
+    logger.warning(f"Неавторизованный доступ с {request.client.host}")
+    raise HTTPException(401, detail="Требуется действующая лицензия или активный пробный период")
 
 # ================= ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЯ В MAX =================
 async def send_max_notification(
@@ -176,20 +177,20 @@ async def send_max_notification(
         return
 
     text = (
-        f"📩 **Новая заявка на банковскую гарантию!**\\n\\n"
-        f"🔹 **Номер тендера:** {reg_number}\\n"
-        f"👤 **Клиент:** {client_name}\\n"
-        f"🏢 **ИНН:** {inn or \'Не указан\'}\\n"
-        f"📞 **Телефон:** {phone}\\n"
-        f"✉️ **Email:** {email}\\n"
-        f"💰 **Начальная цена (НМЦ):** {nmc or \'Не указана\'}\\n"
-        f"📅 **Дата окончания контракта:** {end_date or \'Не указана\'}\\n"
-        f"📅 **Дата окончания подачи заявок:** {bid_end_date or \'Не указана\'}\\n"
-        f"🔒 **Обеспечение заявки:** {bid_security or \'Не указано\'}\\n"
-        f"🔒 **Обеспечение контракта:** {contract_security or \'Не указано\'}\\n"
-        f"📋 **Тип гарантии:** {\'Обеспечение заявки (участие)\' if guarantee_type == \'participation\' else \'Обеспечение исполнения контракта\'}\\n"
-        f"📧 **Связь только по email:** {\'Да\' if contact_by_email else \'Нет (звонить)\'}\\n"
-        f"🕐 **Время заявки:** {datetime.now().strftime(\'%d.%m.%Y %H:%M\')}"
+        f"Новая заявка на банковскую гарантию!\n\n"
+        f"Номер тендера: {reg_number}\n"
+        f"Клиент: {client_name}\n"
+        f"ИНН: {inn or 'Не указан'}\n"
+        f"Телефон: {phone}\n"
+        f"Email: {email}\n"
+        f"Начальная цена (НМЦ): {nmc or 'Не указана'}\n"
+        f"Дата окончания контракта: {end_date or 'Не указана'}\n"
+        f"Дата окончания подачи заявок: {bid_end_date or 'Не указана'}\n"
+        f"Обеспечение заявки: {bid_security or 'Не указано'}\n"
+        f"Обеспечение контракта: {contract_security or 'Не указано'}\n"
+        f"Тип гарантии: {'Обеспечение заявки (участие)' if guarantee_type == 'participation' else 'Обеспечение исполнения контракта'}\n"
+        f"Связь только по email: {'Да' if contact_by_email else 'Нет (звонить)'}\n"
+        f"Время заявки: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
 
     url = f"{MAX_API_URL}?chat_id={MAX_CHAT_ID}"
@@ -203,11 +204,11 @@ async def send_max_notification(
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code == 200:
-                logger.info(f"✅ Уведомление в MAX отправлено (тендер {reg_number})")
+                logger.info(f"Уведомление в MAX отправлено (тендер {reg_number})")
             else:
-                logger.error(f"❌ Ошибка MAX API: {response.status_code} - {response.text}")
+                logger.error(f"Ошибка MAX API: {response.status_code} - {response.text}")
     except Exception as e:
-        logger.error(f"❌ Исключение при отправке в MAX: {e}")
+        logger.error(f"Исключение при отправке в MAX: {e}")
 
 # ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/health")
@@ -296,8 +297,8 @@ async def robokassa_result(request: Request):
     signature = data.get("SignatureValue")
     expected = hashlib.md5(f"{out_sum}:{inv_id}:{PASSWORD_2}".encode()).hexdigest()
     if signature.lower() != expected.lower():
-        logger.warning(f"Invalid Robokassa signature from {request.client.host}")
-        raise HTTPException(400, "Invalid signature")
+        logger.warning(f"Неверная подпись Robokassa от {request.client.host}")
+        raise HTTPException(400, "Неверная подпись")
     return f"OK{inv_id}"
 
 @app.get("/robokassa/success")
@@ -307,7 +308,7 @@ async def robokassa_success(request: Request):
     <html>
     <head><meta charset="UTF-8"><title>Оплата успешна</title></head>
     <body style="font-family: Arial; text-align: center; padding: 40px;">
-        <h1>✅ Оплата прошла успешно!</h1>
+        <h1>Оплата прошла успешно!</h1>
         <p>Ваш лицензионный ключ: <strong>XXXX-YYYY-ZZZZ-WWWW</strong></p>
         <p>Скопируйте его и вставьте в расширение.</p>
         <a href="/">На главную</a>
@@ -321,8 +322,8 @@ async def robokassa_success(request: Request):
 async def create_order(request: Request):
     admin_token = request.headers.get("X-Admin-Token")
     if admin_token != ADMIN_TOKEN:
-        logger.warning(f"Invalid admin token from {request.client.host}")
-        raise HTTPException(403, "Invalid admin token")
+        logger.warning(f"Неверный admin token от {request.client.host}")
+        raise HTTPException(403, "Неверный admin token")
     license_key = await database.create_license(days_valid=30)
     if not license_key:
         raise HTTPException(500, "Не удалось создать лицензию")
@@ -336,17 +337,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 def read_docx(file_path):
     try:
         doc = Document(file_path)
-        return "\\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
     except Exception as e:
         return f"Ошибка чтения docx: {e}"
 
 def read_txt(file_path):
     try:
-        with open(file_path, \'r\', encoding=\'utf-8\') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             return f.read()
     except:
         try:
-            with open(file_path, \'r\', encoding=\'cp1251\') as f:
+            with open(file_path, 'r', encoding='cp1251') as f:
                 return f.read()
         except Exception as e:
             return f"Ошибка чтения txt: {e}"
@@ -356,7 +357,7 @@ def read_excel(file_path):
         wb = openpyxl.load_workbook(file_path, data_only=True)
         sheet = wb.active
         rows = sheet.iter_rows(values_only=True)
-        return "\\n".join(str(cell) for row in rows for cell in row if cell)
+        return "\n".join(str(cell) for row in rows for cell in row if cell)
     except:
         try:
             wb = xlrd.open_workbook(file_path)
@@ -365,7 +366,7 @@ def read_excel(file_path):
             for row in range(sheet.nrows):
                 row_text = [str(sheet.cell_value(row, col)) for col in range(sheet.ncols) if sheet.cell_value(row, col)]
                 if row_text:
-                    text += " ".join(row_text) + "\\n"
+                    text += " ".join(row_text) + "\n"
             return text
         except Exception as e:
             return f"Ошибка чтения Excel: {e}"
@@ -402,7 +403,7 @@ def query_deepseek(prompt, license_key=None, device_id=None):
             ))
         return answer
     except Exception as e:
-        error_msg = f"❌ Ошибка: {e}"
+        error_msg = f"Ошибка: {e}"
         if license_key or device_id:
             asyncio.create_task(database.increment_usage(
                 license_key=license_key,
@@ -420,19 +421,19 @@ def analyze_file(file_path, selected_fields):
     elif ext in (".xlsx", ".xls"):
         content = read_excel(file_path)
     else:
-        return f"⚠️ Неподдерживаемый формат: {ext}"
+        return f"Неподдерживаемый формат: {ext}"
     if not content or "Ошибка чтения" in content:
-        return f"⚠️ Не удалось прочитать файл"
+        return f"Не удалось прочитать файл"
     content = content[:30000]
     if not content.strip():
-        return "⚠️ Файл пустой"
+        return "Файл пустой"
     if not selected_fields:
         selected_fields = [
             "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
             "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
-    fields_str = "\\n".join(f"{field}: " for field in selected_fields)
+    fields_str = "\n".join(f"{field}: " for field in selected_fields)
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
 {fields_str}
@@ -440,9 +441,9 @@ def analyze_file(file_path, selected_fields):
 {content}
 Извлеки данные и напиши в указанном формате."""
     answer = query_deepseek(prompt)
-    lines = answer.split(\'\\n\')
+    lines = answer.split('\n')
     filtered = [line for line in lines if any(line.strip().startswith(f) for f in selected_fields)]
-    return "\\n".join(filtered) if filtered else answer
+    return "\n".join(filtered) if filtered else answer
 
 def analyze_tender_text(text, selected_fields, license_key=None, device_id=None):
     if not selected_fields:
@@ -451,7 +452,7 @@ def analyze_tender_text(text, selected_fields, license_key=None, device_id=None)
             "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
-    fields_str = "\\n".join(f"{field}: " for field in selected_fields)
+    fields_str = "\n".join(f"{field}: " for field in selected_fields)
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
 {fields_str}
@@ -460,9 +461,9 @@ def analyze_tender_text(text, selected_fields, license_key=None, device_id=None)
 Извлеки данные и напиши в указанном формате."""
     answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
     result = {}
-    for line in answer.split(\'\\n\'):
-        if \':\' in line:
-            k, v = line.split(\':\', 1)
+    for line in answer.split('\n'):
+        if ':' in line:
+            k, v = line.split(':', 1)
             result[k.strip()] = v.strip()
     return result
 
@@ -491,7 +492,7 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
         cached = await database.get_cached_analysis(reg_number)
         if cached:
             await database.increment_cache_usage(reg_number)
-            logger.info(f"📦 Кэш для {reg_number} использован")
+            logger.info(f"Кэш для {reg_number} использован")
             return {
                 "url": tender.url,
                 "reg_number": reg_number,
@@ -507,7 +508,7 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
         start = time.time()
         analysis_result = analyze_tender_text(tender_text, selected_fields, license_key, device_id)
         await database.save_analysis_cache(reg_number, analysis_result)
-        logger.info(f"⏱️ DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек")
+        logger.info(f"DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек")
         return {
             "url": tender.url,
             "reg_number": reg_number,
@@ -518,18 +519,18 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     results = await asyncio.gather(*tasks)
 
     doc = Document()
-    doc.add_heading(\'РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ\', 0)
-    doc.add_paragraph(f\'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}\')
-    doc.add_paragraph(\'=\' * 50)
+    doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
+    doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+    doc.add_paragraph('=' * 50)
     for item in results:
-        doc.add_heading(f\'Тендер: {item.get("reg_number", "Неизвестно")}\', level=1)
+        doc.add_heading(f'Тендер: {item.get("reg_number", "Неизвестно")}', level=1)
         if "error" in item:
-            doc.add_paragraph(f\'❌ Ошибка: {item["error"]}\')
+            doc.add_paragraph(f'Ошибка: {item["error"]}')
         else:
             analysis = item.get("analysis", {})
             if isinstance(analysis, dict):
                 for k, v in analysis.items():
-                    doc.add_paragraph(f\'{k}: {v}\')
+                    doc.add_paragraph(f'{k}: {v}')
             else:
                 doc.add_paragraph(str(analysis))
         doc.add_page_break()
@@ -539,39 +540,39 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     word_buffer.seek(0)
 
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, \'w\') as zf:
-        zf.writestr(f\'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx\', word_buffer.getvalue())
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+        zf.writestr(f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx', word_buffer.getvalue())
 
     zip_buffer.seek(0)
-    filename = f\'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip\'
+    filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     encoded = quote(filename)
     return Response(
         zip_buffer.getvalue(),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{encoded}"}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     )
 
 # ================= УПАКОВКА ФАЙЛОВ =================
 def detect_file_type(content: bytes) -> str:
-    if content.startswith(b\'%PDF\'): return \'pdf\'
-    if content.startswith(b\'PK\\x03\\x04\') or content.startswith(b\'PK\\x05\\x06\') or content.startswith(b\'PK\\x07\\x08\'):
+    if content.startswith(b'%PDF'): return 'pdf'
+    if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 files = zf.namelist()
-                if any(f.startswith(\'word/\') for f in files): return \'docx\'
-                if any(f.startswith(\'xl/\') for f in files): return \'xlsx\'
-                return \'zip\'
+                if any(f.startswith('word/') for f in files): return 'docx'
+                if any(f.startswith('xl/') for f in files): return 'xlsx'
+                return 'zip'
         except:
-            return \'zip\'
-    if content.startswith(b\'Rar!\\x1a\\x07\\x00\') or content.startswith(b\'Rar!\\x1a\\x07\\x01\\x00\') or content.startswith(b\'Rar!\'): return \'rar\'
-    if content.startswith(b\'\\xD0\\xCF\\x11\\xE0\\xA1\\xB1\\x1A\\xE1\'):
-        if b\'WorkBook\' in content[:2000] or b\'BOUNDSHEET\' in content[:2000]: return \'xls\'
-        return \'doc\'
-    if content.startswith(b\'7z\\xbc\\xaf\\x27\\x1c\'): return \'7z\'
-    if content.startswith(b\'\\x89PNG\\r\\n\\x1a\\n\'): return \'png\'
-    if content.startswith(b\'\\xff\\xd8\\xff\'): return \'jpg\'
-    if content.startswith(b\'{\\rtf\'): return \'rtf\'
-    return \'unknown\'
+            return 'zip'
+    if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'): return 'rar'
+    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]: return 'xls'
+        return 'doc'
+    if content.startswith(b'7z\xbc\xaf\x27\x1c'): return '7z'
+    if content.startswith(b'\x89PNG\r\n\x1a\n'): return 'png'
+    if content.startswith(b'\xff\xd8\xff'): return 'jpg'
+    if content.startswith(b'{\rtf'): return 'rtf'
+    return 'unknown'
 
 @app.post("/package_files")
 @limiter.limit("10/minute")
@@ -592,23 +593,23 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
         if total_size > max_total_size:
             raise HTTPException(400, "Общий размер файлов превышает 500 МБ")
         
-        parts = file.filename.split(\'_\', 1)
+        parts = file.filename.split('_', 1)
         tender_id = parts[0] if len(parts) == 2 else "без_тендера"
         original_name = parts[1] if len(parts) == 2 else file.filename
         file_type = detect_file_type(content)
-        base = os.path.splitext(original_name)[0] or \'file\'
+        base = os.path.splitext(original_name)[0] or 'file'
         ext_map = {
-            \'pdf\': \'.pdf\', \'xlsx\': \'.xlsx\', \'xls\': \'.xls\', \'docx\': \'.docx\',
-            \'rar\': \'.rar\', \'zip\': \'.zip\', \'7z\': \'.7z\', \'png\': \'.png\',
-            \'jpg\': \'.jpg\', \'rtf\': \'.rtf\'
+            'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
+            'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
+            'jpg': '.jpg', 'rtf': '.rtf'
         }
         new_ext = ext_map.get(file_type)
         if new_ext:
             original_name = base + new_ext
         else:
-            if \'.\' not in original_name:
-                original_name = base + \'.bin\'
-        logger.info(f"🔍 Тип: {file_type}, имя: {original_name}")
+            if '.' not in original_name:
+                original_name = base + '.bin'
+        logger.info(f"Тип: {file_type}, имя: {original_name}")
         tenders.setdefault(tender_id, []).append((original_name, content))
     
     for tender_id, file_list in tenders.items():
@@ -626,17 +627,17 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
         tenders[tender_id] = new_list
     
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, \'w\') as zf:
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
         for tender_id, file_list in tenders.items():
             folder = f"Тендер_{tender_id}"
             for name, content in file_list:
                 zf.writestr(os.path.join(folder, name), content)
         if analysis_text:
             doc = Document()
-            doc.add_heading(\'РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ\', 0)
-            doc.add_paragraph(f\'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}\')
-            doc.add_paragraph(\'=\' * 50)
-            sections = analysis_text.split(\'=== Тендер\')
+            doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
+            doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+            doc.add_paragraph('=' * 50)
+            sections = analysis_text.split('=== Тендер')
             for s in sections:
                 if s.strip():
                     doc.add_paragraph(s.strip())
@@ -646,9 +647,9 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
             zf.writestr("анализ_тендеров.docx", word_buf.getvalue())
     
     zip_buffer.seek(0)
-    filename = f"результаты_анализа_{datetime.now().strftime(\'%Y%m%d_%H%M%S\')}.zip"
+    filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded = quote(filename)
-    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{encoded}"})
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
 # ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКСТА ДЛЯ ГАРАНТИИ =================
 @app.post("/api/guarantee/analyze")
@@ -668,7 +669,7 @@ async def guarantee_analyze(request: Request, data: dict):
         ]
     analysis_result = analyze_tender_text(text, selected_fields)
     await database.save_analysis_cache(reg_number, analysis_result)
-    logger.info(f"✅ Анализ для {reg_number} выполнен и сохранён в кэш")
+    logger.info(f"Анализ для {reg_number} выполнен и сохранён в кэш")
     return {"status": "ok", "reg_number": reg_number}
 
 # ================= ЭНДПОЙНТ ДЛЯ СТРАНИЦЫ ГАРАНТИИ =================
@@ -678,7 +679,7 @@ async def guarantee_page(request: Request):
     if not reg_number:
         return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
     
-    if not reg_number.replace(\'-\', \'\').replace(\'/\', \'\').isalnum():
+    if not reg_number.replace('-', '').replace('/', '').isalnum():
         raise HTTPException(400, "Некорректный номер тендера")
     
     cached = await database.get_cached_analysis(reg_number)
@@ -748,23 +749,23 @@ async def guarantee_page(request: Request):
             </div>
             <div class="field">
                 <label>Начальная цена (НМЦ)</label>
-                <input type="text" name="nmc" value="{data.get(\'Начальная цена (НМЦ)\', \'\')}" placeholder="Не указано">
+                <input type="text" name="nmc" value="{data.get('Начальная цена (НМЦ)', '')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Дата окончания контракта</label>
-                <input type="text" name="endDate" value="{data.get(\'ДАТА ОКОНЧАНИЯ КОНТРАКТА\', \'\')}" placeholder="Не указано">
+                <input type="text" name="endDate" value="{data.get('ДАТА ОКОНЧАНИЯ КОНТРАКТА', '')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Дата окончания подачи заявок</label>
-                <input type="text" name="bidEndDate" value="{data.get(\'ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ\', \'\')}" placeholder="Не указано">
+                <input type="text" name="bidEndDate" value="{data.get('ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ', '')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Обеспечение заявки</label>
-                <input type="text" name="bidSecurity" value="{data.get(\'Обеспечение заявки\', \'\')}" placeholder="Не указано">
+                <input type="text" name="bidSecurity" value="{data.get('Обеспечение заявки', '')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Обеспечение контракта</label>
-                <input type="text" name="contractSecurity" value="{data.get(\'Обеспечение контракта\', \'\')}" placeholder="Не указано">
+                <input type="text" name="contractSecurity" value="{data.get('Обеспечение контракта', '')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Тип гарантии</label>
@@ -813,9 +814,9 @@ async def guarantee_page(request: Request):
         </div>
 
         <script>
-            const consentPersonal = document.getElementById(\'consent_personal\');
-            const consentTerms = document.getElementById(\'consent_terms\');
-            const submitBtn = document.getElementById(\'submitBtn\');
+            const consentPersonal = document.getElementById('consent_personal');
+            const consentTerms = document.getElementById('consent_terms');
+            const submitBtn = document.getElementById('submitBtn');
 
             function checkConsents() {{
                 if (consentPersonal.checked && consentTerms.checked) {{
@@ -825,8 +826,8 @@ async def guarantee_page(request: Request):
                 }}
             }}
 
-            consentPersonal.addEventListener(\'change\', checkConsents);
-            consentTerms.addEventListener(\'change\', checkConsents);
+            consentPersonal.addEventListener('change', checkConsents);
+            consentTerms.addEventListener('change', checkConsents);
         </script>
     </body>
     </html>
@@ -856,11 +857,11 @@ async def guarantee_request(
     if not consent_personal or not consent_terms:
         raise HTTPException(400, "Необходимо дать согласие на обработку персональных данных и принять условия")
     
-    inn_clean = inn.replace(\' \', \'\').replace(\'-\', \'\')
+    inn_clean = inn.replace(' ', '').replace('-', '')
     if not inn_clean.isdigit() or len(inn_clean) not in [10, 12]:
         raise HTTPException(400, "Некорректный ИНН")
     
-    if \'@\' not in email or \'.\' not in email.split(\'@\')[1]:
+    if '@' not in email or '.' not in email.split('@')[1]:
         raise HTTPException(400, "Некорректный email")
 
     try:
@@ -873,7 +874,7 @@ async def guarantee_request(
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             """, regNumber, nmc, endDate, bidEndDate, guaranteeType,
                 clientName, inn, phone, email, bidSecurity, contractSecurity, contact_by_email)
-        logger.info(f"✅ Заявка для тендера {regNumber} сохранена в БД")
+        logger.info(f"Заявка для тендера {regNumber} сохранена в БД")
 
         asyncio.create_task(
             send_max_notification(
@@ -893,7 +894,7 @@ async def guarantee_request(
         )
 
     except Exception as e:
-        logger.error(f"❌ Ошибка сохранения в БД: {e}")
+        logger.error(f"Ошибка сохранения в БД: {e}")
         raise HTTPException(500, "Ошибка при сохранении заявки")
 
     return HTMLResponse("""
@@ -901,10 +902,10 @@ async def guarantee_request(
     <html>
     <head><meta charset="UTF-8"><title>Заявка отправлена</title></head>
     <body style="text-align: center; padding: 40px; font-family: Arial;">
-        <h1 style="color: #10b981;">✅ Заявка успешно отправлена!</h1>
+        <h1 style="color: #10b981;">Заявка успешно отправлена!</h1>
         <p>Мы свяжемся с вами в ближайшее время.</p>
         <p style="margin-top: 20px;">
-            <a href="/" style="color: #667eea; text-decoration: none;">← На главную</a>
+            <a href="/" style="color: #667eea; text-decoration: none;">На главную</a>
         </p>
     </body>
     </html>
@@ -942,7 +943,7 @@ async def search_tenders(request: Request, data: dict):
     if not tender_urls:
         return {"detail": "Тендеры по вашему запросу не найдены"}
     
-    base_dir = f"search_{datetime.now().strftime(\'%Y%m%d_%H%M%S\')}"
+    base_dir = f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(base_dir, exist_ok=True)
     results = []
     
@@ -955,9 +956,9 @@ async def search_tenders(request: Request, data: dict):
             if files:
                 combined_text = ""
                 for file_path in files:
-                    text = read_docx(file_path) if file_path.endswith(\'.docx\') else read_txt(file_path) if file_path.endswith(\'.txt\') else read_excel(file_path)
+                    text = read_docx(file_path) if file_path.endswith('.docx') else read_txt(file_path) if file_path.endswith('.txt') else read_excel(file_path)
                     if text and not text.startswith("Ошибка"):
-                        combined_text += text + "\\n"
+                        combined_text += text + "\n"
                 results.append({
                     "tender_name": tender_name,
                     "files": files,
@@ -969,22 +970,22 @@ async def search_tenders(request: Request, data: dict):
             shutil.rmtree(base_dir, ignore_errors=True)
     
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, \'w\') as zf:
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
         for res in results:
             doc = Document()
-            doc.add_heading(f\'Анализ тендера: {res["tender_name"]}\', 0)
-            doc.add_paragraph(f\'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}\')
-            doc.add_paragraph(\'=\' * 50)
+            doc.add_heading(f'Анализ тендера: {res["tender_name"]}', 0)
+            doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+            doc.add_paragraph('=' * 50)
             doc.add_paragraph(res["text"] if res["text"] else "Не удалось извлечь текст из документов")
             word_buf = io.BytesIO()
             doc.save(word_buf)
             word_buf.seek(0)
-            zf.writestr(f"{res[\'tender_name\']}_результат.docx", word_buf.getvalue())
+            zf.writestr(f"{res['tender_name']}_результат.docx", word_buf.getvalue())
     
     zip_buffer.seek(0)
-    filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime(\'%Y%m%d_%H%M%S\')}.zip"
+    filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded = quote(filename)
-    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{encoded}"})
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
 @app.post("/suggest_keywords")
 @limiter.limit("10/minute")
@@ -1002,7 +1003,7 @@ async def suggest_keywords(request: Request, data: dict):
 Ключевые слова должны быть конкретными (например, "строительство школы", "поставка медоборудования", "ремонт дорог").
 Выдай ТОЛЬКО список слов через запятую, без лишнего текста."""
     answer = query_deepseek(prompt)
-    keywords = [kw.strip() for kw in answer.replace(\'\\n\', \',\').split(\',\') if kw.strip()]
+    keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
     return {"keywords": keywords[:7]}
 
 @app.post("/ask_ai")
@@ -1036,9 +1037,9 @@ async def verify_license_endpoint(request: Request):
 async def activate_license(request: Request, data: LicenseActivateRequest):
     result = await database.verify_and_activate_license(data.key)
     if not result["valid"]:
-        logger.warning(f"Failed license activation attempt: {data.key[:8]}... from {request.client.host}")
+        logger.warning(f"Неудачная активация лицензии: {data.key[:8]}... от {request.client.host}")
         return {"valid": False, "reason": result["reason"]}
-    logger.info(f"License activated: {data.key[:8]}...")
+    logger.info(f"Лицензия активирована: {data.key[:8]}...")
     return {"valid": True, "expires_at": result["expires_at"]}
 
 # ================= ЗАПУСК =================
