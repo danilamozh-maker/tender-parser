@@ -91,7 +91,7 @@ app.add_middleware(
 # ================= TRUSTED HOSTS =================
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["your-domain.com", "*.your-domain.com", "localhost"]
+    allowed_hosts=["csb24-tender.com", "*.com", "localhost"]
 )
 
 # ================= MIDDLEWARE ЛОГИРОВАНИЯ =================
