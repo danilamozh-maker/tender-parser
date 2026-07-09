@@ -201,7 +201,7 @@ async def send_max_notification(
     payload = {"text": text}
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code == 200:
                 logger.info(f"Уведомление в MAX отправлено (тендер {reg_number})")
