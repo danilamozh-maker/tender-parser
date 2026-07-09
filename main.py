@@ -82,7 +82,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ================= CORS =================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["chrome-extension://*"], # Укажите точный ID расширения
+    allow_origins=["chrome-extension://*"],
     allow_credentials=True,
     allow_methods=["POST", "GET"],
     allow_headers=["X-License-Key", "X-Device-ID", "Content-Type"],
@@ -103,7 +103,7 @@ async def log_requests(request: Request, call_next):
     logger.info(
         f"{request.method} {request.url.path} - {response.status_code} - "
         f"{duration:.2f}s - {request.client.host} - "
-        f"License: {request.headers.get('X-License-Key', 'none')[:8]}..."
+        f"License: {request.headers.get(\'X-License-Key\', \'none\')[:8]}..."
     )
     return response
 
@@ -113,10 +113,10 @@ class TenderData(BaseModel):
     regNumber: str = Field(..., max_length=50)
     text: str = Field(..., max_length=50000)
 
-    @validator('url')
+    @validator(\'url\')
     def validate_url(cls, v):
-        if not v.startswith(('http://', 'https://')):
-            raise ValueError('URL должен начинаться с http:// или https://')
+        if not v.startswith((\'http://\', \'https://\')):
+            raise ValueError(\'URL должен начинаться с http:// или https://\')
         return v
 
 class AnalyzeRequest(BaseModel):
@@ -176,20 +176,20 @@ async def send_max_notification(
         return
 
     text = (
-        f"📩 **Новая заявка на банковскую гарантию!**\n\n"
-        f"🔹 **Номер тендера:** {reg_number}\n"
-        f"👤 **Клиент:** {client_name}\n"
-        f"🏢 **ИНН:** {inn or 'Не указан'}\n"
-        f"📞 **Телефон:** {phone}\n"
-        f"✉️ **Email:** {email}\n"
-        f"💰 **Начальная цена (НМЦ):** {nmc or 'Не указана'}\n"
-        f"📅 **Дата окончания контракта:** {end_date or 'Не указана'}\n"
-        f"📅 **Дата окончания подачи заявок:** {bid_end_date or 'Не указана'}\n"
-        f"🔒 **Обеспечение заявки:** {bid_security or 'Не указано'}\n"
-        f"🔒 **Обеспечение контракта:** {contract_security or 'Не указано'}\n"
-        f"📋 **Тип гарантии:** {'Обеспечение заявки (участие)' if guarantee_type == 'participation' else 'Обеспечение исполнения контракта'}\n"
-        f"📧 **Связь только по email:** {'Да' if contact_by_email else 'Нет (звонить)'}\n"
-        f"🕐 **Время заявки:** {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        f"📩 **Новая заявка на банковскую гарантию!**\\n\\n"
+        f"🔹 **Номер тендера:** {reg_number}\\n"
+        f"👤 **Клиент:** {client_name}\\n"
+        f"🏢 **ИНН:** {inn or \'Не указан\'}\\n"
+        f"📞 **Телефон:** {phone}\\n"
+        f"✉️ **Email:** {email}\\n"
+        f"💰 **Начальная цена (НМЦ):** {nmc or \'Не указана\'}\\n"
+        f"📅 **Дата окончания контракта:** {end_date or \'Не указана\'}\\n"
+        f"📅 **Дата окончания подачи заявок:** {bid_end_date or \'Не указана\'}\\n"
+        f"🔒 **Обеспечение заявки:** {bid_security or \'Не указано\'}\\n"
+        f"🔒 **Обеспечение контракта:** {contract_security or \'Не указано\'}\\n"
+        f"📋 **Тип гарантии:** {\'Обеспечение заявки (участие)\' if guarantee_type == \'participation\' else \'Обеспечение исполнения контракта\'}\\n"
+        f"📧 **Связь только по email:** {\'Да\' if contact_by_email else \'Нет (звонить)\'}\\n"
+        f"🕐 **Время заявки:** {datetime.now().strftime(\'%d.%m.%Y %H:%M\')}"
     )
 
     url = f"{MAX_API_URL}?chat_id={MAX_CHAT_ID}"
@@ -336,17 +336,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 def read_docx(file_path):
     try:
         doc = Document(file_path)
-        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        return "\\n".join(p.text for p in doc.paragraphs if p.text.strip())
     except Exception as e:
         return f"Ошибка чтения docx: {e}"
 
 def read_txt(file_path):
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, \'r\', encoding=\'utf-8\') as f:
             return f.read()
     except:
         try:
-            with open(file_path, 'r', encoding='cp1251') as f:
+            with open(file_path, \'r\', encoding=\'cp1251\') as f:
                 return f.read()
         except Exception as e:
             return f"Ошибка чтения txt: {e}"
@@ -356,7 +356,7 @@ def read_excel(file_path):
         wb = openpyxl.load_workbook(file_path, data_only=True)
         sheet = wb.active
         rows = sheet.iter_rows(values_only=True)
-        return "\n".join(str(cell) for row in rows for cell in row if cell)
+        return "\\n".join(str(cell) for row in rows for cell in row if cell)
     except:
         try:
             wb = xlrd.open_workbook(file_path)
@@ -365,7 +365,7 @@ def read_excel(file_path):
             for row in range(sheet.nrows):
                 row_text = [str(sheet.cell_value(row, col)) for col in range(sheet.ncols) if sheet.cell_value(row, col)]
                 if row_text:
-                    text += " ".join(row_text) + "\n"
+                    text += " ".join(row_text) + "\\n"
             return text
         except Exception as e:
             return f"Ошибка чтения Excel: {e}"
@@ -432,7 +432,7 @@ def analyze_file(file_path, selected_fields):
             "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
-    fields_str = "\n".join(f"{field}: " for field in selected_fields)
+    fields_str = "\\n".join(f"{field}: " for field in selected_fields)
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
 {fields_str}
@@ -440,9 +440,9 @@ def analyze_file(file_path, selected_fields):
 {content}
 Извлеки данные и напиши в указанном формате."""
     answer = query_deepseek(prompt)
-    lines = answer.split('\n')
+    lines = answer.split(\'\\n\')
     filtered = [line for line in lines if any(line.strip().startswith(f) for f in selected_fields)]
-    return "\n".join(filtered) if filtered else answer
+    return "\\n".join(filtered) if filtered else answer
 
 def analyze_tender_text(text, selected_fields, license_key=None, device_id=None):
     if not selected_fields:
@@ -451,7 +451,7 @@ def analyze_tender_text(text, selected_fields, license_key=None, device_id=None)
             "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
-    fields_str = "\n".join(f"{field}: " for field in selected_fields)
+    fields_str = "\\n".join(f"{field}: " for field in selected_fields)
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
 {fields_str}
@@ -460,9 +460,9 @@ def analyze_tender_text(text, selected_fields, license_key=None, device_id=None)
 Извлеки данные и напиши в указанном формате."""
     answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
     result = {}
-    for line in answer.split('\n'):
-        if ':' in line:
-            k, v = line.split(':', 1)
+    for line in answer.split(\'\\n\'):
+        if \':\' in line:
+            k, v = line.split(\':\', 1)
             result[k.strip()] = v.strip()
     return result
 
@@ -518,18 +518,18 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     results = await asyncio.gather(*tasks)
 
     doc = Document()
-    doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
-    doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
-    doc.add_paragraph('=' * 50)
+    doc.add_heading(\'РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ\', 0)
+    doc.add_paragraph(f\'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}\')
+    doc.add_paragraph(\'=\' * 50)
     for item in results:
-        doc.add_heading(f'Тендер: {item.get("reg_number", "Неизвестно")}', level=1)
+        doc.add_heading(f\'Тендер: {item.get("reg_number", "Неизвестно")}\', level=1)
         if "error" in item:
-            doc.add_paragraph(f'❌ Ошибка: {item["error"]}')
+            doc.add_paragraph(f\'❌ Ошибка: {item["error"]}\')
         else:
             analysis = item.get("analysis", {})
             if isinstance(analysis, dict):
                 for k, v in analysis.items():
-                    doc.add_paragraph(f'{k}: {v}')
+                    doc.add_paragraph(f\'{k}: {v}\')
             else:
                 doc.add_paragraph(str(analysis))
         doc.add_page_break()
@@ -539,39 +539,39 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     word_buffer.seek(0)
 
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w') as zf:
-        zf.writestr(f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx', word_buffer.getvalue())
+    with zipfile.ZipFile(zip_buffer, \'w\') as zf:
+        zf.writestr(f\'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx\', word_buffer.getvalue())
 
     zip_buffer.seek(0)
-    filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+    filename = f\'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip\'
     encoded = quote(filename)
     return Response(
         zip_buffer.getvalue(),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{encoded}"}
     )
 
 # ================= УПАКОВКА ФАЙЛОВ =================
 def detect_file_type(content: bytes) -> str:
-    if content.startswith(b'%PDF'): return 'pdf'
-    if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
+    if content.startswith(b\'%PDF\'): return \'pdf\'
+    if content.startswith(b\'PK\\x03\\x04\') or content.startswith(b\'PK\\x05\\x06\') or content.startswith(b\'PK\\x07\\x08\'):
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 files = zf.namelist()
-                if any(f.startswith('word/') for f in files): return 'docx'
-                if any(f.startswith('xl/') for f in files): return 'xlsx'
-                return 'zip'
+                if any(f.startswith(\'word/\') for f in files): return \'docx\'
+                if any(f.startswith(\'xl/\') for f in files): return \'xlsx\'
+                return \'zip\'
         except:
-            return 'zip'
-    if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'): return 'rar'
-    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
-        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]: return 'xls'
-        return 'doc'
-    if content.startswith(b'7z\xbc\xaf\x27\x1c'): return '7z'
-    if content.startswith(b'\x89PNG\r\n\x1a\n'): return 'png'
-    if content.startswith(b'\xff\xd8\xff'): return 'jpg'
-    if content.startswith(b'{\\rtf'): return 'rtf'
-    return 'unknown'
+            return \'zip\'
+    if content.startswith(b\'Rar!\\x1a\\x07\\x00\') or content.startswith(b\'Rar!\\x1a\\x07\\x01\\x00\') or content.startswith(b\'Rar!\'): return \'rar\'
+    if content.startswith(b\'\\xD0\\xCF\\x11\\xE0\\xA1\\xB1\\x1A\\xE1\'):
+        if b\'WorkBook\' in content[:2000] or b\'BOUNDSHEET\' in content[:2000]: return \'xls\'
+        return \'doc\'
+    if content.startswith(b\'7z\\xbc\\xaf\\x27\\x1c\'): return \'7z\'
+    if content.startswith(b\'\\x89PNG\\r\\n\\x1a\\n\'): return \'png\'
+    if content.startswith(b\'\\xff\\xd8\\xff\'): return \'jpg\'
+    if content.startswith(b\'{\\rtf\'): return \'rtf\'
+    return \'unknown\'
 
 @app.post("/package_files")
 @limiter.limit("10/minute")
@@ -584,7 +584,7 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
     
     tenders = {}
     total_size = 0
-    max_total_size = 500 * 1024 * 1024 # 500 MB
+    max_total_size = 500 * 1024 * 1024
     
     for file in files:
         content = await file.read()
@@ -592,22 +592,22 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
         if total_size > max_total_size:
             raise HTTPException(400, "Общий размер файлов превышает 500 МБ")
         
-        parts = file.filename.split('_', 1)
+        parts = file.filename.split(\'_\', 1)
         tender_id = parts[0] if len(parts) == 2 else "без_тендера"
         original_name = parts[1] if len(parts) == 2 else file.filename
         file_type = detect_file_type(content)
-        base = os.path.splitext(original_name)[0] or 'file'
+        base = os.path.splitext(original_name)[0] or \'file\'
         ext_map = {
-            'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
-            'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
-            'jpg': '.jpg', 'rtf': '.rtf'
+            \'pdf\': \'.pdf\', \'xlsx\': \'.xlsx\', \'xls\': \'.xls\', \'docx\': \'.docx\',
+            \'rar\': \'.rar\', \'zip\': \'.zip\', \'7z\': \'.7z\', \'png\': \'.png\',
+            \'jpg\': \'.jpg\', \'rtf\': \'.rtf\'
         }
         new_ext = ext_map.get(file_type)
         if new_ext:
             original_name = base + new_ext
         else:
-            if '.' not in original_name:
-                original_name = base + '.bin'
+            if \'.\' not in original_name:
+                original_name = base + \'.bin\'
         logger.info(f"🔍 Тип: {file_type}, имя: {original_name}")
         tenders.setdefault(tender_id, []).append((original_name, content))
     
@@ -626,17 +626,17 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
         tenders[tender_id] = new_list
     
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+    with zipfile.ZipFile(zip_buffer, \'w\') as zf:
         for tender_id, file_list in tenders.items():
             folder = f"Тендер_{tender_id}"
             for name, content in file_list:
                 zf.writestr(os.path.join(folder, name), content)
         if analysis_text:
             doc = Document()
-            doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
-            doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
-            doc.add_paragraph('=' * 50)
-            sections = analysis_text.split('=== Тендер')
+            doc.add_heading(\'РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ\', 0)
+            doc.add_paragraph(f\'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}\')
+            doc.add_paragraph(\'=\' * 50)
+            sections = analysis_text.split(\'=== Тендер\')
             for s in sections:
                 if s.strip():
                     doc.add_paragraph(s.strip())
@@ -646,9 +646,9 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
             zf.writestr("анализ_тендеров.docx", word_buf.getvalue())
     
     zip_buffer.seek(0)
-    filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    filename = f"результаты_анализа_{datetime.now().strftime(\'%Y%m%d_%H%M%S\')}.zip"
     encoded = quote(filename)
-    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{encoded}"})
 
 # ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКСТА ДЛЯ ГАРАНТИИ =================
 @app.post("/api/guarantee/analyze")
@@ -678,8 +678,7 @@ async def guarantee_page(request: Request):
     if not reg_number:
         return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
     
-    # Валидация reg_number
-    if not reg_number.replace('-', '').replace('/', '').isalnum():
+    if not reg_number.replace(\'-\', \'\').replace(\'/\', \'\').isalnum():
         raise HTTPException(400, "Некорректный номер тендера")
     
     cached = await database.get_cached_analysis(reg_number)
@@ -749,23 +748,23 @@ async def guarantee_page(request: Request):
             </div>
             <div class="field">
                 <label>Начальная цена (НМЦ)</label>
-                <input type="text" name="nmc" value="{data.get('Начальная цена (НМЦ)', '')}" placeholder="Не указано">
+                <input type="text" name="nmc" value="{data.get(\'Начальная цена (НМЦ)\', \'\')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Дата окончания контракта</label>
-                <input type="text" name="endDate" value="{data.get('ДАТА ОКОНЧАНИЯ КОНТРАКТА', '')}" placeholder="Не указано">
+                <input type="text" name="endDate" value="{data.get(\'ДАТА ОКОНЧАНИЯ КОНТРАКТА\', \'\')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Дата окончания подачи заявок</label>
-                <input type="text" name="bidEndDate" value="{data.get('ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ', '')}" placeholder="Не указано">
+                <input type="text" name="bidEndDate" value="{data.get(\'ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ\', \'\')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Обеспечение заявки</label>
-                <input type="text" name="bidSecurity" value="{data.get('Обеспечение заявки', '')}" placeholder="Не указано">
+                <input type="text" name="bidSecurity" value="{data.get(\'Обеспечение заявки\', \'\')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Обеспечение контракта</label>
-                <input type="text" name="contractSecurity" value="{data.get('Обеспечение контракта', '')}" placeholder="Не указано">
+                <input type="text" name="contractSecurity" value="{data.get(\'Обеспечение контракта\', \'\')}" placeholder="Не указано">
             </div>
             <div class="field">
                 <label>Тип гарантии</label>
@@ -814,9 +813,9 @@ async def guarantee_page(request: Request):
         </div>
 
         <script>
-            const consentPersonal = document.getElementById('consent_personal');
-            const consentTerms = document.getElementById('consent_terms');
-            const submitBtn = document.getElementById('submitBtn');
+            const consentPersonal = document.getElementById(\'consent_personal\');
+            const consentTerms = document.getElementById(\'consent_terms\');
+            const submitBtn = document.getElementById(\'submitBtn\');
 
             function checkConsents() {{
                 if (consentPersonal.checked && consentTerms.checked) {{
@@ -826,8 +825,8 @@ async def guarantee_page(request: Request):
                 }}
             }}
 
-            consentPersonal.addEventListener('change', checkConsents);
-            consentTerms.addEventListener('change', checkConsents);
+            consentPersonal.addEventListener(\'change\', checkConsents);
+            consentTerms.addEventListener(\'change\', checkConsents);
         </script>
     </body>
     </html>
@@ -854,17 +853,14 @@ async def guarantee_request(
     consent_personal: bool = Form(False),
     consent_terms: bool = Form(False)
 ):
-    # Проверка согласий
     if not consent_personal or not consent_terms:
         raise HTTPException(400, "Необходимо дать согласие на обработку персональных данных и принять условия")
     
-    # Валидация ИНН
-    inn_clean = inn.replace(' ', '').replace('-', '')
+    inn_clean = inn.replace(\' \', \'\').replace(\'-\', \'\')
     if not inn_clean.isdigit() or len(inn_clean) not in [10, 12]:
         raise HTTPException(400, "Некорректный ИНН")
     
-    # Валидация email
-    if '@' not in email or '.' not in email.split('@')[1]:
+    if \'@\' not in email or \'.\' not in email.split(\'@\')[1]:
         raise HTTPException(400, "Некорректный email")
 
     try:
@@ -926,7 +922,7 @@ async def start_trial(request: Request, data: TrialRequest):
 
 @app.post("/api/trial/status")
 @limiter.limit("10/minute")
-async def check_trial(data: TrialRequest):
+async def check_trial(request: Request, data: TrialRequest):
     result = await database.get_trial_status(data.device_id)
     return result
 
@@ -946,7 +942,7 @@ async def search_tenders(request: Request, data: dict):
     if not tender_urls:
         return {"detail": "Тендеры по вашему запросу не найдены"}
     
-    base_dir = f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    base_dir = f"search_{datetime.now().strftime(\'%Y%m%d_%H%M%S\')}"
     os.makedirs(base_dir, exist_ok=True)
     results = []
     
@@ -959,9 +955,9 @@ async def search_tenders(request: Request, data: dict):
             if files:
                 combined_text = ""
                 for file_path in files:
-                    text = read_docx(file_path) if file_path.endswith('.docx') else read_txt(file_path) if file_path.endswith('.txt') else read_excel(file_path)
+                    text = read_docx(file_path) if file_path.endswith(\'.docx\') else read_txt(file_path) if file_path.endswith(\'.txt\') else read_excel(file_path)
                     if text and not text.startswith("Ошибка"):
-                        combined_text += text + "\n"
+                        combined_text += text + "\\n"
                 results.append({
                     "tender_name": tender_name,
                     "files": files,
@@ -973,22 +969,22 @@ async def search_tenders(request: Request, data: dict):
             shutil.rmtree(base_dir, ignore_errors=True)
     
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+    with zipfile.ZipFile(zip_buffer, \'w\') as zf:
         for res in results:
             doc = Document()
-            doc.add_heading(f'Анализ тендера: {res["tender_name"]}', 0)
-            doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
-            doc.add_paragraph('=' * 50)
+            doc.add_heading(f\'Анализ тендера: {res["tender_name"]}\', 0)
+            doc.add_paragraph(f\'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}\')
+            doc.add_paragraph(\'=\' * 50)
             doc.add_paragraph(res["text"] if res["text"] else "Не удалось извлечь текст из документов")
             word_buf = io.BytesIO()
             doc.save(word_buf)
             word_buf.seek(0)
-            zf.writestr(f"{res['tender_name']}_результат.docx", word_buf.getvalue())
+            zf.writestr(f"{res[\'tender_name\']}_результат.docx", word_buf.getvalue())
     
     zip_buffer.seek(0)
-    filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime(\'%Y%m%d_%H%M%S\')}.zip"
     encoded = quote(filename)
-    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{encoded}"})
 
 @app.post("/suggest_keywords")
 @limiter.limit("10/minute")
@@ -1006,7 +1002,7 @@ async def suggest_keywords(request: Request, data: dict):
 Ключевые слова должны быть конкретными (например, "строительство школы", "поставка медоборудования", "ремонт дорог").
 Выдай ТОЛЬКО список слов через запятую, без лишнего текста."""
     answer = query_deepseek(prompt)
-    keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
+    keywords = [kw.strip() for kw in answer.replace(\'\\n\', \',\').split(\',\') if kw.strip()]
     return {"keywords": keywords[:7]}
 
 @app.post("/ask_ai")
@@ -1047,6 +1043,5 @@ async def activate_license(request: Request, data: LicenseActivateRequest):
 
 # ================= ЗАПУСК =================
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
