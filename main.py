@@ -82,10 +82,14 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ================= CORS =================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["chrome-extension://*"],
+    allow_origins=[
+        "chrome-extension://*",  # так не работает с credentials
+        "https://csb24-tender.ru",
+        "http://csb24-tender.ru"
+    ],
     allow_credentials=True,
-    allow_methods=["POST", "GET"],
-    allow_headers=["X-License-Key", "X-Device-ID", "Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ================= TRUSTED HOSTS =================
