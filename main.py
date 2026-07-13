@@ -355,15 +355,20 @@ async def yookassa_webhook(request: Request):
 
 @app.get("/success", response_class=HTMLResponse)
 async def success_page(request: Request):
-    # ЮKassa добавляет параметр paymentId при редиректе
-    payment_id = request.query_params.get("paymentId")
+    # Логируем все параметры запроса для отладки
+    params = dict(request.query_params)
+    logger.info(f"Параметры запроса на /success: {params}")
+
+    # Пытаемся получить payment_id в разных вариантах
+    payment_id = params.get("paymentId") or params.get("payment_id")
     if not payment_id:
+        logger.error(f"Не найден payment_id в параметрах: {params}")
         return HTMLResponse("""
         <html>
         <head><meta charset="UTF-8"><title>Ошибка</title></head>
         <body style="text-align:center;padding:40px;font-family:Arial;">
             <h1 style="color:#ef4444;">Ошибка</h1>
-            <p>Не указан идентификатор платежа.</p>
+            <p>Не указан идентификатор платежа. Пожалуйста, проверьте URL.</p>
         </body>
         </html>
         """)
@@ -433,16 +438,6 @@ async def success_page(request: Request):
     </body>
     </html>
     """)
-
-@app.get("/api/get-license")
-@limiter.limit("10/minute")
-async def get_license(request: Request, payment_id: str):
-    if not payment_id:
-        raise HTTPException(400, "Не указан payment_id")
-    license_key = await database.get_license_by_payment(payment_id)
-    if not license_key:
-        raise HTTPException(404, "Лицензия ещё не создана")
-    return {"license_key": license_key}
 
 # ================= УДАЛЯЕМ ВСЁ, ЧТО СВЯЗАНО С РОБОКАССОЙ =================
 # (эндпоинты /robokassa/result и /robokassa/success удалены)
