@@ -15,4 +15,4 @@ httpx
 python-dotenv
 slowapi
 pydantic
-yookassa>-2.0.0
+yookassa>=2.0.0
