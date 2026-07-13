@@ -60,7 +60,7 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 if not ADMIN_TOKEN:
     raise ValueError("ADMIN_TOKEN не найден в .env")
 
-# ================= НАСТРОЙКИ ЮKASSA (ВМЕСТО РОБОКАССЫ) =================
+# ================= НАСТРОЙКИ ЮKASSA =================
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
 if not all([YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY]):
@@ -275,7 +275,7 @@ async def updates_xml():
 @app.post("/api/create-payment")
 @limiter.limit("5/minute")
 async def create_payment(request: Request, data: dict = None):
-    amount_value = data.get("amount", 30) if data else 30
+    amount_value = data.get("amount", 2500) if data else 2500
     device_id = request.headers.get("X-Device-ID", "unknown")
     email = data.get("email", "client@example.com") if data else "client@example.com"
 
@@ -287,7 +287,7 @@ async def create_payment(request: Request, data: dict = None):
             },
             "confirmation": {
                 "type": "redirect",
-                "return_url": f"https://csb24-tender.ru/success?payment_id={{id}}"
+                "return_url": "https://csb24-tender.ru/success" # БЕЗ параметра
             },
             "capture": True,
             "description": "Лицензия для Тендерного парсера (1 месяц)",
@@ -306,7 +306,7 @@ async def create_payment(request: Request, data: dict = None):
                             "value": str(amount_value),
                             "currency": "RUB"
                         },
-                        "vat_code": 4, # для УСН (доходы минус расходы) — НДС не облагается
+                        "vat_code": 4, # УСН (доходы-расходы) — НДС не облагается
                         "payment_mode": "full_payment",
                         "payment_subject": "service"
                     }
@@ -355,7 +355,8 @@ async def yookassa_webhook(request: Request):
 
 @app.get("/success", response_class=HTMLResponse)
 async def success_page(request: Request):
-    payment_id = request.query_params.get("payment_id")
+    # ЮKassa добавляет параметр paymentId при редиректе
+    payment_id = request.query_params.get("paymentId")
     if not payment_id:
         return HTMLResponse("""
         <html>
@@ -391,17 +392,21 @@ async def success_page(request: Request):
             <script>
                 (async function() {{
                     const paymentId = "{payment_id}";
-                    try {{
-                        const resp = await fetch(`/api/get-license?payment_id=${{paymentId}}`);
-                        const data = await resp.json();
-                        if (data.license_key) {{
-                            document.getElementById('licenseKey').textContent = data.license_key;
-                        }} else {{
-                            document.getElementById('licenseKey').textContent = 'Ожидание обработки платежа... Обновите страницу через несколько минут.';
-                        }}
-                    }} catch (e) {{
-                        document.getElementById('licenseKey').textContent = 'Ошибка получения ключа. Попробуйте обновить страницу.';
+                    let attempts = 0;
+                    const maxAttempts = 15;
+                    while (attempts < maxAttempts) {{
+                        try {{
+                            const resp = await fetch(`/api/get-license?payment_id=${{paymentId}}`);
+                            const data = await resp.json();
+                            if (data.license_key) {{
+                                document.getElementById('licenseKey').textContent = data.license_key;
+                                return;
+                            }}
+                        }} catch (e) {{}}
+                        attempts++;
+                        await new Promise(r => setTimeout(r, 2000));
                     }}
+                    document.getElementById('licenseKey').textContent = 'Не удалось получить ключ. Обратитесь в поддержку.';
                 }})();
             </script>
         </body>
