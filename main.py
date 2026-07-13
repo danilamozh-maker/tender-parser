@@ -60,7 +60,7 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 if not ADMIN_TOKEN:
     raise ValueError("ADMIN_TOKEN не найден в .env")
 
-# ================= НАСТРОЙКИ ЮKASSA =================
+# ================= НАСТРОЙКИ ЮKASSA (ВМЕСТО РОБОКАССЫ) =================
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
 if not all([YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY]):
@@ -271,7 +271,7 @@ async def updates_xml():
         raise HTTPException(404, "Файл updates.xml не найден")
     return FileResponse(file_path, media_type="application/xml")
 
-# ================= ЭНДПОЙНТЫ ЮKASSA =================
+# ================= ЭНДПОЙНТЫ ЮKASSA (ВМЕСТО РОБОКАССЫ) =================
 @app.post("/api/create-payment")
 @limiter.limit("5/minute")
 async def create_payment(request: Request, data: dict = None):
@@ -421,7 +421,7 @@ async def get_license(payment_id: str):
     return {"license_key": license_key}
 
 # ================= УДАЛЯЕМ ВСЁ, ЧТО СВЯЗАНО С РОБОКАССОЙ =================
-# (никаких эндпоинтов /robokassa/... больше нет)
+# (эндпоинты /robokassa/result и /robokassa/success удалены)
 
 # ================= ЛИЦЕНЗИИ =================
 @app.post("/api/create-order")
@@ -440,11 +440,714 @@ async def create_order(request: Request):
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ================= ВСЕ ОСТАЛЬНЫЕ ЭНДПОЙНТЫ (НЕ ТРОГАЛИ) =================
-# Сюда копируем всё остальное, что было в вашем исходном main.py
-# (analyze_texts, package_files, guarantee, trial, search_tenders, suggest_keywords, ask_ai, verify-license, activate-license)
-# Я не буду дублировать их здесь, чтобы не перегружать ответ, но они должны быть в том же виде, как у вас были.
-# Если нужно, я могу выдать их отдельным блоком.
+# ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
+def read_docx(file_path):
+    try:
+        doc = Document(file_path)
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    except Exception as e:
+        return f"Ошибка чтения docx: {e}"
+
+def read_txt(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except:
+        try:
+            with open(file_path, 'r', encoding='cp1251') as f:
+                return f.read()
+        except Exception as e:
+            return f"Ошибка чтения txt: {e}"
+
+def read_excel(file_path):
+    try:
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        sheet = wb.active
+        rows = sheet.iter_rows(values_only=True)
+        return "\n".join(str(cell) for row in rows for cell in row if cell)
+    except:
+        try:
+            wb = xlrd.open_workbook(file_path)
+            sheet = wb.sheet_by_index(0)
+            text = ""
+            for row in range(sheet.nrows):
+                row_text = [str(sheet.cell_value(row, col)) for col in range(sheet.ncols) if sheet.cell_value(row, col)]
+                if row_text:
+                    text += " ".join(row_text) + "\n"
+            return text
+        except Exception as e:
+            return f"Ошибка чтения Excel: {e}"
+
+# ================= ЗАПРОСЫ К DEEPSEEK =================
+def query_deepseek(prompt, license_key=None, device_id=None):
+    messages = [
+        {"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
+        {"role": "user", "content": prompt}
+    ]
+    payload = {
+        "model": MODEL_NAME,
+        "messages": messages,
+        "temperature": 0.3,
+        "max_tokens": 2500,
+        "stream": False
+    }
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    try:
+        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=60)
+        total_tokens = 0
+        if response.status_code == 200:
+            result = response.json()
+            usage = result.get("usage", {})
+            total_tokens = usage.get("total_tokens", 0)
+            answer = result["choices"][0]["message"]["content"]
+        else:
+            answer = f"Ошибка HTTP {response.status_code}: {response.text}"
+        if license_key or device_id:
+            asyncio.create_task(database.increment_usage(
+                license_key=license_key,
+                device_id=device_id,
+                tokens_used=total_tokens
+            ))
+        return answer
+    except Exception as e:
+        error_msg = f"Ошибка: {e}"
+        if license_key or device_id:
+            asyncio.create_task(database.increment_usage(
+                license_key=license_key,
+                device_id=device_id,
+                tokens_used=0
+            ))
+        return error_msg
+
+def analyze_file(file_path, selected_fields):
+    ext = Path(file_path).suffix.lower()
+    if ext == ".docx":
+        content = read_docx(file_path)
+    elif ext == ".txt":
+        content = read_txt(file_path)
+    elif ext in (".xlsx", ".xls"):
+        content = read_excel(file_path)
+    else:
+        return f"Неподдерживаемый формат: {ext}"
+    if not content or "Ошибка чтения" in content:
+        return f"Не удалось прочитать файл"
+    content = content[:30000]
+    if not content.strip():
+        return "Файл пустой"
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+    fields_str = "\n".join(f"{field}: " for field in selected_fields)
+    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
+Ответ должен быть строго в таком формате (каждый пункт с новой строки):
+{fields_str}
+Вот текст для анализа:
+{content}
+Извлеки данные и напиши в указанном формате."""
+    answer = query_deepseek(prompt)
+    lines = answer.split('\n')
+    filtered = [line for line in lines if any(line.strip().startswith(f) for f in selected_fields)]
+    return "\n".join(filtered) if filtered else answer
+
+def analyze_tender_text(text, selected_fields, license_key=None, device_id=None):
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+    fields_str = "\n".join(f"{field}: " for field in selected_fields)
+    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
+Ответ должен быть строго в таком формате (каждый пункт с новой строки):
+{fields_str}
+Вот текст для анализа:
+{text[:8000]}
+Извлеки данные и напиши в указанном формате."""
+    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
+    result = {}
+    for line in answer.split('\n'):
+        if ':' in line:
+            k, v = line.split(':', 1)
+            result[k.strip()] = v.strip()
+    return result
+
+# ================= ЭНДПОЙНТ АНАЛИЗА ТЕНДЕРОВ =================
+@app.post("/analyze_texts")
+@limiter.limit("10/minute")
+async def analyze_texts(request: Request, data: AnalyzeRequest):
+    await check_access(request)
+    tenders_data = data.tenders
+    if not tenders_data:
+        raise HTTPException(400, "Нет данных для анализа")
+   
+    selected_fields = data.fields
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+   
+    license_key = request.headers.get("X-License-Key")
+    device_id = request.headers.get("X-Device-ID")
+
+    async def analyze_one(tender):
+        reg_number = tender.regNumber
+        cached = await database.get_cached_analysis(reg_number)
+        if cached:
+            await database.increment_cache_usage(reg_number)
+            logger.info(f"Кэш для {reg_number} использован")
+            return {
+                "url": tender.url,
+                "reg_number": reg_number,
+                "analysis": cached
+            }
+        tender_text = tender.text
+        if not tender_text or len(tender_text) < 100:
+            return {
+                "url": tender.url,
+                "reg_number": reg_number,
+                "error": "Недостаточно текста для анализа"
+            }
+        start = time.time()
+        analysis_result = analyze_tender_text(tender_text, selected_fields, license_key, device_id)
+        await database.save_analysis_cache(reg_number, analysis_result)
+        logger.info(f"DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек")
+        return {
+            "url": tender.url,
+            "reg_number": reg_number,
+            "analysis": analysis_result
+        }
+
+    tasks = [analyze_one(t) for t in tenders_data]
+    results = await asyncio.gather(*tasks)
+
+    doc = Document()
+    doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
+    doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+    doc.add_paragraph('=' * 50)
+    for item in results:
+        doc.add_heading(f'Тендер: {item.get("reg_number", "Неизвестно")}', level=1)
+        if "error" in item:
+            doc.add_paragraph(f'Ошибка: {item["error"]}')
+        else:
+            analysis = item.get("analysis", {})
+            if isinstance(analysis, dict):
+                for k, v in analysis.items():
+                    doc.add_paragraph(f'{k}: {v}')
+            else:
+                doc.add_paragraph(str(analysis))
+        doc.add_page_break()
+
+    word_buffer = io.BytesIO()
+    doc.save(word_buffer)
+    word_buffer.seek(0)
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+        zf.writestr(f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx', word_buffer.getvalue())
+
+    zip_buffer.seek(0)
+    filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+    encoded = quote(filename)
+    return Response(
+        zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+    )
+
+# ================= УПАКОВКА ФАЙЛОВ =================
+def detect_file_type(content: bytes) -> str:
+    if content.startswith(b'%PDF'): return 'pdf'
+    if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                files = zf.namelist()
+                if any(f.startswith('word/') for f in files): return 'docx'
+                if any(f.startswith('xl/') for f in files): return 'xlsx'
+                return 'zip'
+        except:
+            return 'zip'
+    if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'): return 'rar'
+    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]: return 'xls'
+        return 'doc'
+    if content.startswith(b'7z\xbc\xaf\x27\x1c'): return '7z'
+    if content.startswith(b'\x89PNG\r\n\x1a\n'): return 'png'
+    if content.startswith(b'\xff\xd8\xff'): return 'jpg'
+    if content.startswith(b'{\\rtf'): return 'rtf'
+    return 'unknown'
+
+@app.post("/package_files")
+@limiter.limit("10/minute")
+async def package_files(request: Request, files: list[UploadFile] = File(...), analysis_text: str = Form("")):
+    await check_access(request)
+    if not files:
+        raise HTTPException(400, "Нет файлов")
+    if len(files) > 100:
+        raise HTTPException(400, "Слишком много файлов (макс. 100)")
+   
+    tenders = {}
+    total_size = 0
+    max_total_size = 500 * 1024 * 1024
+   
+    for file in files:
+        content = await file.read()
+        total_size += len(content)
+        if total_size > max_total_size:
+            raise HTTPException(400, "Общий размер файлов превышает 500 МБ")
+       
+        parts = file.filename.split('_', 1)
+        tender_id = parts[0] if len(parts) == 2 else "без_тендера"
+        original_name = parts[1] if len(parts) == 2 else file.filename
+        file_type = detect_file_type(content)
+        base = os.path.splitext(original_name)[0] or 'file'
+        ext_map = {
+            'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
+            'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
+            'jpg': '.jpg', 'rtf': '.rtf'
+        }
+        new_ext = ext_map.get(file_type)
+        if new_ext:
+            original_name = base + new_ext
+        else:
+            if '.' not in original_name:
+                original_name = base + '.bin'
+        logger.info(f"Тип: {file_type}, имя: {original_name}")
+        tenders.setdefault(tender_id, []).append((original_name, content))
+   
+    for tender_id, file_list in tenders.items():
+        seen = set()
+        new_list = []
+        for name, content in file_list:
+            base, ext = os.path.splitext(name)
+            counter = 1
+            new_name = name
+            while new_name in seen:
+                new_name = f"{base}_{counter}{ext}"
+                counter += 1
+            seen.add(new_name)
+            new_list.append((new_name, content))
+        tenders[tender_id] = new_list
+   
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+        for tender_id, file_list in tenders.items():
+            folder = f"Тендер_{tender_id}"
+            for name, content in file_list:
+                zf.writestr(os.path.join(folder, name), content)
+        if analysis_text:
+            doc = Document()
+            doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРОВ', 0)
+            doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+            doc.add_paragraph('=' * 50)
+            sections = analysis_text.split('=== Тендер')
+            for s in sections:
+                if s.strip():
+                    doc.add_paragraph(s.strip())
+            word_buf = io.BytesIO()
+            doc.save(word_buf)
+            word_buf.seek(0)
+            zf.writestr("анализ_тендеров.docx", word_buf.getvalue())
+   
+    zip_buffer.seek(0)
+    filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    encoded = quote(filename)
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКСТА ДЛЯ ГАРАНТИИ =================
+@app.post("/api/guarantee/analyze")
+@limiter.limit("10/minute")
+async def guarantee_analyze(request: Request, data: dict):
+    await check_access(request)
+    reg_number = data.get("regNumber")
+    text = data.get("text", "")
+    selected_fields = data.get("fields", [])
+    if not reg_number or not text or len(text) < 100:
+        raise HTTPException(400, "Недостаточно данных для анализа")
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+    analysis_result = analyze_tender_text(text, selected_fields)
+    await database.save_analysis_cache(reg_number, analysis_result)
+    logger.info(f"Анализ для {reg_number} выполнен и сохранён в кэш")
+    return {"status": "ok", "reg_number": reg_number}
+
+# ================= ЭНДПОЙНТ ДЛЯ СТРАНИЦЫ ГАРАНТИИ =================
+@app.get("/guarantee", response_class=HTMLResponse)
+async def guarantee_page(request: Request):
+    reg_number = request.query_params.get("regNumber")
+    if not reg_number:
+        return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
+   
+    if not reg_number.replace('-', '').replace('/', '').isalnum():
+        raise HTTPException(400, "Некорректный номер тендера")
+   
+    cached = await database.get_cached_analysis(reg_number)
+    data = cached if cached else {}
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Заявка на банковскую гарантию</title>
+        <style>
+            body {{ font-family: Arial; padding: 20px; max-width: 600px; margin: auto; }}
+            label {{ display: block; margin-top: 8px; font-weight: bold; font-size: 14px; }}
+            input, select {{ width: 100%; padding: 6px; margin-top: 2px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }}
+            .btn {{ background: #f59e0b; color: white; border: none; padding: 10px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 16px; }}
+            .btn:hover {{ background: #d97706; }}
+            .btn:disabled {{ background: #ccc; cursor: not-allowed; }}
+            .field {{ margin-bottom: 12px; }}
+            .inline-label {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin: 6px 0 12px 0;
+                justify-content: flex-start;
+                font-weight: normal;
+            }}
+            .inline-label input[type="checkbox"] {{
+                width: 16px;
+                height: 16px;
+                margin: 0;
+                flex-shrink: 0;
+            }}
+            .inline-label span {{
+                font-size: 13px;
+                color: #1e293b;
+            }}
+            .consent-block {{
+                margin-top: 10px;
+                border-top: 1px solid #e2e8f0;
+                padding-top: 12px;
+            }}
+            .consent-block label {{
+                font-weight: normal;
+                font-size: 13px;
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                margin-top: 6px;
+            }}
+            .consent-block input[type="checkbox"] {{
+                width: 16px;
+                height: 16px;
+                margin-top: 2px;
+                flex-shrink: 0;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>Заявка на банковскую гарантию</h1>
+        <form id="guaranteeForm" action="/api/guarantee/request" method="post">
+            <input type="hidden" name="regNumber" value="{reg_number}">
+           
+            <div class="field">
+                <label>Номер тендера</label>
+                <input type="text" value="{reg_number}" readonly>
+            </div>
+            <div class="field">
+                <label>Начальная цена (НМЦ)</label>
+                <input type="text" name="nmc" value="{data.get('Начальная цена (НМЦ)', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Дата окончания контракта</label>
+                <input type="text" name="endDate" value="{data.get('ДАТА ОКОНЧАНИЯ КОНТРАКТА', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Дата окончания подачи заявок</label>
+                <input type="text" name="bidEndDate" value="{data.get('ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Обеспечение заявки</label>
+                <input type="text" name="bidSecurity" value="{data.get('Обеспечение заявки', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Обеспечение контракта</label>
+                <input type="text" name="contractSecurity" value="{data.get('Обеспечение контракта', '')}" placeholder="Не указано">
+            </div>
+            <div class="field">
+                <label>Тип гарантии</label>
+                <select name="guaranteeType" required>
+                    <option value="">Выберите</option>
+                    <option value="participation">Обеспечение заявки (участие)</option>
+                    <option value="execution">Обеспечение исполнения контракта</option>
+                </select>
+            </div>
+            <div class="field">
+                <label>Ваше имя</label>
+                <input type="text" name="clientName" placeholder="Иванов Иван Иванович" required>
+            </div>
+            <div class="field">
+                <label>ИНН компании</label>
+                <input type="text" name="inn" placeholder="1234567890" required pattern="[0-9]{{10,12}}">
+            </div>
+            <div class="field">
+                <label>Телефон</label>
+                <input type="tel" name="phone" placeholder="+7 (999) 123-45-67" required>
+            </div>
+            <div class="field">
+                <label>Email</label>
+                <input type="email" name="email" placeholder="user@example.com" required>
+            </div>
+            <div class="inline-label">
+                <input type="checkbox" name="contact_by_email" value="true">
+                <span>Не звонить мне, связываться только по email</span>
+            </div>
+
+            <div class="consent-block">
+                <label>
+                    <input type="checkbox" id="consent_personal" name="consent_personal" required>
+                    Я даю согласие на обработку моих персональных данных в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных»
+                </label>
+                <label>
+                    <input type="checkbox" id="consent_terms" name="consent_terms" required>
+                    Я принимаю условия <a href="https://csb24-tender.ru/offer" target="_blank">Пользовательского соглашения</a> и <a href="https://csb24-tender.ru/privacy-policy" target="_blank">Политики конфиденциальности</a>
+                </label>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn" disabled>Отправить заявку</button>
+        </form>
+        <div style="margin-top: 20px; font-size: 13px; color: #666;">
+            <a href="/">На главную</a>
+        </div>
+
+        <script>
+            const consentPersonal = document.getElementById('consent_personal');
+            const consentTerms = document.getElementById('consent_terms');
+            const submitBtn = document.getElementById('submitBtn');
+
+            function checkConsents() {{
+                if (consentPersonal.checked && consentTerms.checked) {{
+                    submitBtn.disabled = false;
+                }} else {{
+                    submitBtn.disabled = true;
+                }}
+            }}
+
+            consentPersonal.addEventListener('change', checkConsents);
+            consentTerms.addEventListener('change', checkConsents);
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+# ================= ЭНДПОЙНТ ПРИЁМА ЗАЯВКИ =================
+@app.post("/api/guarantee/request")
+@limiter.limit("5/minute")
+async def guarantee_request(
+    request: Request,
+    regNumber: str = Form(...),
+    nmc: str = Form(""),
+    endDate: str = Form(""),
+    bidEndDate: str = Form(""),
+    bidSecurity: str = Form(""),
+    contractSecurity: str = Form(""),
+    guaranteeType: str = Form(...),
+    clientName: str = Form(...),
+    inn: str = Form(...),
+    phone: str = Form(...),
+    email: str = Form(...),
+    contact_by_email: bool = Form(False),
+    consent_personal: bool = Form(False),
+    consent_terms: bool = Form(False)
+):
+    if not consent_personal or not consent_terms:
+        raise HTTPException(400, "Необходимо дать согласие на обработку персональных данных и принять условия")
+   
+    inn_clean = inn.replace(' ', '').replace('-', '')
+    if not inn_clean.isdigit() or len(inn_clean) not in [10, 12]:
+        raise HTTPException(400, "Некорректный ИНН")
+   
+    if '@' not in email or '.' not in email.split('@')[1]:
+        raise HTTPException(400, "Некорректный email")
+
+    try:
+        pool = await database.get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO guarantee_requests
+                (reg_number, nmc, end_date, bid_end_date, guarantee_type,
+                 client_name, inn, phone, email, bid_security, contract_security, contact_by_email)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            """, regNumber, nmc, endDate, bidEndDate, guaranteeType,
+                clientName, inn, phone, email, bidSecurity, contractSecurity, contact_by_email)
+        logger.info(f"Заявка для тендера {regNumber} сохранена в БД")
+
+        asyncio.create_task(
+            send_max_notification(
+                reg_number=regNumber,
+                client_name=clientName,
+                inn=inn,
+                phone=phone,
+                email=email,
+                nmc=nmc,
+                end_date=endDate,
+                bid_end_date=bidEndDate,
+                bid_security=bidSecurity,
+                contract_security=contractSecurity,
+                guarantee_type=guaranteeType,
+                contact_by_email=contact_by_email
+            )
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка сохранения в БД: {e}")
+        raise HTTPException(500, "Ошибка при сохранении заявки")
+
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><title>Заявка отправлена</title></head>
+    <body style="text-align: center; padding: 40px; font-family: Arial;">
+        <h1 style="color: #10b981;">Заявка успешно отправлена!</h1>
+        <p>Мы свяжемся с вами в ближайшее время.</p>
+        <p style="margin-top: 20px;">
+            <a href="/" style="color: #667eea; text-decoration: none;">На главную</a>
+        </p>
+    </body>
+    </html>
+    """)
+
+# ================= ПРОБНЫЙ ПЕРИОД =================
+@app.post("/api/trial/start")
+@limiter.limit("3/hour")
+async def start_trial(request: Request, data: TrialRequest):
+    device_id = data.device_id
+    ip_address = request.client.host
+    user_agent = request.headers.get("User-Agent")
+    result = await database.start_trial(device_id, trial_days=2, ip_address=ip_address, user_agent=user_agent)
+    return result
+
+@app.post("/api/trial/status")
+@limiter.limit("10/minute")
+async def check_trial(request: Request, data: TrialRequest):
+    result = await database.get_trial_status(data.device_id)
+    return result
+
+# ================= ОСТАЛЬНЫЕ ЭНДПОЙНТЫ =================
+@app.post("/search_tenders")
+@limiter.limit("5/minute")
+async def search_tenders(request: Request, data: dict):
+    await check_access(request)
+    query = data.get("query", "").strip()
+    limit = data.get("limit", MAX_TENDERS)
+    if not query:
+        raise HTTPException(400, "Введите ключевые слова для поиска")
+    if len(query) > 200:
+        raise HTTPException(400, "Запрос слишком длинный")
+   
+    tender_urls = parser.search_tenders_zakupki(query, limit)
+    if not tender_urls:
+        return {"detail": "Тендеры по вашему запросу не найдены"}
+   
+    base_dir = f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    os.makedirs(base_dir, exist_ok=True)
+    results = []
+   
+    try:
+        for idx, tender_url in enumerate(tender_urls[:MAX_TENDERS], 1):
+            tender_name = f"Тендер_{idx}"
+            tender_dir = os.path.join(base_dir, tender_name)
+            os.makedirs(tender_dir, exist_ok=True)
+            files = parser.download_files_from_tender(tender_url, tender_dir)
+            if files:
+                combined_text = ""
+                for file_path in files:
+                    text = read_docx(file_path) if file_path.endswith('.docx') else read_txt(file_path) if file_path.endswith('.txt') else read_excel(file_path)
+                    if text and not text.startswith("Ошибка"):
+                        combined_text += text + "\n"
+                results.append({
+                    "tender_name": tender_name,
+                    "files": files,
+                    "text": combined_text[:5000]
+                })
+            await asyncio.sleep(2)
+    finally:
+        if os.path.exists(base_dir):
+            shutil.rmtree(base_dir, ignore_errors=True)
+   
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+        for res in results:
+            doc = Document()
+            doc.add_heading(f'Анализ тендера: {res["tender_name"]}', 0)
+            doc.add_paragraph(f'Дата анализа: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+            doc.add_paragraph('=' * 50)
+            doc.add_paragraph(res["text"] if res["text"] else "Не удалось извлечь текст из документов")
+            word_buf = io.BytesIO()
+            doc.save(word_buf)
+            word_buf.seek(0)
+            zf.writestr(f"{res['tender_name']}_результат.docx", word_buf.getvalue())
+   
+    zip_buffer.seek(0)
+    filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    encoded = quote(filename)
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+
+@app.post("/suggest_keywords")
+@limiter.limit("10/minute")
+async def suggest_keywords(request: Request, data: dict):
+    await check_access(request)
+    description = data.get("description", "").strip()
+    if not description:
+        raise HTTPException(400, "Описание не может быть пустым")
+    if len(description) > 1000:
+        raise HTTPException(400, "Описание слишком длинное")
+   
+    prompt = f"""Ты — помощник по тендерам. Пользователь описал свою деятельность:
+"{description}"
+Выдели 5–7 ключевых слов для поиска тендеров на zakupki.gov.ru.
+Ключевые слова должны быть конкретными (например, "строительство школы", "поставка медоборудования", "ремонт дорог").
+Выдай ТОЛЬКО список слов через запятую, без лишнего текста."""
+    answer = query_deepseek(prompt)
+    keywords = [kw.strip() for kw in answer.replace('\n', ',').split(',') if kw.strip()]
+    return {"keywords": keywords[:7]}
+
+@app.post("/ask_ai")
+@limiter.limit("10/minute")
+async def ask_ai(request: Request, data: dict):
+    await check_access(request)
+    question = data.get("question", "").strip()
+    if not question:
+        raise HTTPException(400, "Введите вопрос")
+    if len(question) > 1000:
+        raise HTTPException(400, "Вопрос слишком длинный")
+   
+    prompt = f"""Ты — консультант по тендерам и бизнес-процессам. Ответь на вопрос пользователя чётко, по делу, без воды.
+Вопрос пользователя: {question}
+Дай ответ в виде текста (2-4 предложения), который будет полезен для бизнесу."""
+    answer = query_deepseek(prompt)
+    return {"answer": answer}
+
+# ================= ЭНДПОЙНТЫ ДЛЯ ЛИЦЕНЗИЙ =================
+@app.post("/api/verify-license")
+@limiter.limit("10/minute")
+async def verify_license_endpoint(request: Request):
+    try:
+        await check_access(request)
+        return {"valid": True}
+    except HTTPException:
+        return {"valid": False, "reason": "Unauthorized"}
+
+@app.post("/api/activate-license")
+@limiter.limit("5/minute")
+async def activate_license(request: Request, data: LicenseActivateRequest):
+    result = await database.verify_and_activate_license(data.key)
+    if not result["valid"]:
+        logger.warning(f"Неудачная активация лицензии: {data.key[:8]}... от {request.client.host}")
+        return {"valid": False, "reason": result["reason"]}
+    logger.info(f"Лицензия активирована: {data.key[:8]}...")
+    return {"valid": True, "expires_at": result["expires_at"]}
 
 # ================= ЗАПУСК =================
 if __name__ == "__main__":
