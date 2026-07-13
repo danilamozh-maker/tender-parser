@@ -287,7 +287,7 @@ async def create_payment(request: Request, data: dict = None):
             },
             "confirmation": {
                 "type": "redirect",
-                "return_url": "https://csb24-tender.ru/success" # БЕЗ параметра
+                "return_url": "https://csb24-tender.ru/success?paymentId={id}" # БЕЗ параметра
             },
             "capture": True,
             "description": "Лицензия для Тендерного парсера (1 месяц)",
