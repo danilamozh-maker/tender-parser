@@ -32,6 +32,7 @@ async def get_pool():
 async def init_db():
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Таблицы
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -102,7 +103,7 @@ async def init_db():
                 inn TEXT
             )
         """)
-        # НОВАЯ ТАБЛИЦА ДЛЯ ПЛАТЕЖЕЙ ЮKASSA
+        # Новая таблица для платежей
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS payments (
                 payment_id TEXT PRIMARY KEY,
@@ -112,7 +113,7 @@ async def init_db():
             )
         """)
 
-        # Миграции (добавляем недостающие колонки)
+        # Миграции
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
         await conn.execute("ALTER TABLE device_trials ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
@@ -126,7 +127,7 @@ async def init_db():
         await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS contact_by_email BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS inn TEXT")
 
-    print("✅ База данных PostgreSQL инициализирована (с поддержкой платежей ЮKassa)")
+    print("✅ База данных PostgreSQL инициализирована (с поддержкой платежей и поиска по device_id)")
 
 # ================= ПОЛЬЗОВАТЕЛИ =================
 async def create_user(email: str, password: str):
@@ -285,7 +286,6 @@ async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = Non
         return {"status": "ok", "trial_start": now}
 
 async def get_trial_status(device_id: str):
-    """Возвращает статус пробного периода для device_id."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -353,5 +353,16 @@ async def get_license_by_payment(payment_id: str):
         row = await conn.fetchrow(
             "SELECT license_key FROM payments WHERE payment_id = $1",
             payment_id
+        )
+        return row["license_key"] if row else None
+
+# ===== НОВАЯ ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ КЛЮЧА ПО DEVICE_ID =====
+async def get_license_by_device(device_id: str):
+    """Возвращает последний созданный лицензионный ключ для device_id."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT license_key FROM payments WHERE device_id = $1 AND license_key IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+            device_id
         )
         return row["license_key"] if row else None
