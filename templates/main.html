@@ -36,7 +36,7 @@
             height: 4px;
             background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
         }
-        
+       
         /* Hero */
         .hero {
             text-align: center;
@@ -89,7 +89,7 @@
             background: linear-gradient(135deg, #667eea, #764ba2);
             box-shadow: 0 2px 10px rgba(102,126,234,0.3);
         }
-        
+       
         /* Features */
         .features-grid {
             display: grid;
@@ -146,7 +146,7 @@
             margin-left: 6px;
             font-weight: 600;
         }
-        
+       
         /* Section */
         .section {
             margin: 40px 0;
@@ -170,7 +170,7 @@
             background: linear-gradient(180deg, #667eea, #764ba2);
             border-radius: 2px;
         }
-        
+       
         /* Download */
         .download-block {
             background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
@@ -222,7 +222,7 @@
             cursor: not-allowed;
             transform: none !important;
         }
-        
+       
         /* Details */
         details {
             margin-top: 16px;
@@ -269,7 +269,7 @@
             font-family: 'Courier New', monospace;
             color: #334155;
         }
-        
+       
         /* Price */
         .price-block {
             background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
@@ -302,7 +302,7 @@
             font-size: 14px;
             margin-top: 4px;
         }
-        
+       
         /* Status */
         .loader {
             border: 3px solid #e2e8f0;
@@ -325,7 +325,7 @@
         }
         .status-msg.success { background: #ecfdf5; color: #059669; }
         .status-msg.error { background: #fef2f2; color: #dc2626; }
-        
+       
         /* Links */
         .links-row {
             display: flex;
@@ -348,7 +348,7 @@
             color: #764ba2;
             text-decoration: underline;
         }
-        
+       
         /* Legal */
         .legal {
             font-size: 12px;
@@ -361,9 +361,9 @@
         .legal p { margin: 4px 0; }
         .legal a { color: #667eea; text-decoration: none; }
         .legal a:hover { text-decoration: underline; }
-        
+       
         .hidden { display: none !important; }
-        
+       
         /* Responsive */
         @media (max-width: 640px) {
             .card { padding: 28px; border-radius: 20px; }
@@ -453,7 +453,7 @@
             <div class="price-block">
                 <div class="price-label">Стоимость подписки</div>
                 <div class="price">2 500 ₽</div>
-                <div class="sub-price">в месяц · Оплата через Робокассу (СБП, карты)</div>
+                <div class="sub-price">в месяц · Оплата через ЮKassa (СБП, карты)</div>
             </div>
             <button id="payBtn" class="btn btn-success">💳 Оплатить 2 500 ₽</button>
             <div id="loading" class="loader hidden"></div>
@@ -479,24 +479,35 @@
         const btn = this;
         const loading = document.getElementById('loading');
         const statusMsg = document.getElementById('statusMessage');
+
         btn.disabled = true;
         loading.classList.remove('hidden');
         statusMsg.textContent = '⏳ Создание платежа...';
+        statusMsg.className = 'status-msg';
 
         try {
-            const response = await fetch('/api/create-payment');
+            const response = await fetch('/api/create-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: 2500 })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Ошибка сервера: ${response.status} — ${errorText}`);
+            }
+
             const data = await response.json();
-            const url = new URL('https://auth.robokassa.ru/Merchant/Index.aspx');
-            url.searchParams.append('MerchantLogin', data.merchant_login);
-            url.searchParams.append('OutSum', data.out_sum);
-            url.searchParams.append('InvId', data.inv_id);
-            url.searchParams.append('SignatureValue', data.signature);
-            url.searchParams.append('Description', data.description);
-            url.searchParams.append('Culture', data.culture);
-            window.location.href = url.toString();
+
+            if (data.confirmation_url) {
+                // Перенаправляем на страницу оплаты ЮKassa
+                window.location.href = data.confirmation_url;
+            } else {
+                throw new Error('Не получена ссылка для оплаты');
+            }
         } catch (err) {
-            statusMsg.textContent = '❌ Ошибка создания платежа: ' + err.message;
-            statusMsg.classList.add('error');
+            statusMsg.textContent = '❌ Ошибка: ' + err.message;
+            statusMsg.className = 'status-msg error';
             loading.classList.add('hidden');
             btn.disabled = false;
         }
