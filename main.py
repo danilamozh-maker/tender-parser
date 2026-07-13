@@ -275,7 +275,7 @@ async def updates_xml():
 @app.post("/api/create-payment")
 @limiter.limit("5/minute")
 async def create_payment(request: Request, data: dict = None):
-    amount_value = data.get("amount", 2500) if data else 2500
+    amount_value = data.get("amount", 30) if data else 30
     device_id = request.headers.get("X-Device-ID", "unknown")
     email = data.get("email", "client@example.com") if data else "client@example.com"
 
