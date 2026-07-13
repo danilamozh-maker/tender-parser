@@ -159,7 +159,7 @@ async def check_access(request: Request):
     logger.warning(f"Неавторизованный доступ с {request.client.host}")
     raise HTTPException(401, detail="Требуется действующая лицензия или активный пробный период")
 
-# ================= ФУНКЦИЯ ОТПРАВКИ В MAX (ОРИГИНАЛЬНАЯ, НЕ МЕНЯЛИ) =================
+# ================= ФУНКЦИЯ ОТПРАВКИ В MAX (ОРИГИНАЛЬНАЯ) =================
 async def send_max_notification(
     reg_number: str,
     client_name: str,
@@ -271,7 +271,7 @@ async def updates_xml():
         raise HTTPException(404, "Файл updates.xml не найден")
     return FileResponse(file_path, media_type="application/xml")
 
-# ================= ЭНДПОЙНТЫ ЮKASSA (ВМЕСТО РОБОКАССЫ) =================
+# ================= ЭНДПОЙНТЫ ЮKASSA =================
 @app.post("/api/create-payment")
 @limiter.limit("5/minute")
 async def create_payment(request: Request, data: dict = None):
@@ -410,9 +410,10 @@ async def success_page(request: Request):
     </html>
     """)
 
+# ================= ИСПРАВЛЕННАЯ ФУНКЦИЯ (добавлен request) =================
 @app.get("/api/get-license")
 @limiter.limit("10/minute")
-async def get_license(payment_id: str):
+async def get_license(request: Request, payment_id: str):
     if not payment_id:
         raise HTTPException(400, "Не указан payment_id")
     license_key = await database.get_license_by_payment(payment_id)
