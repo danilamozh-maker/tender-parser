@@ -287,7 +287,7 @@ async def create_payment(request: Request, data: dict = None):
             },
             "confirmation": {
                 "type": "redirect",
-                "return_url": "https://csb24-tender.ru/success?paymentId=%payment_id%" # БЕЗ параметра
+                "return_url": f"https://csb24-tender.ru/success?device_id={device_id}"
             },
             "capture": True,
             "description": "Лицензия для Тендерного парсера (1 месяц)",
@@ -306,7 +306,7 @@ async def create_payment(request: Request, data: dict = None):
                             "value": str(amount_value),
                             "currency": "RUB"
                         },
-                        "vat_code": 4, # УСН (доходы-расходы) — НДС не облагается
+                        "vat_code": 4,
                         "payment_mode": "full_payment",
                         "payment_subject": "service"
                     }
@@ -355,25 +355,19 @@ async def yookassa_webhook(request: Request):
 
 @app.get("/success", response_class=HTMLResponse)
 async def success_page(request: Request):
-    # Логируем все параметры запроса для отладки
-    params = dict(request.query_params)
-    logger.info(f"Параметры запроса на /success: {params}")
-
-    # Пытаемся получить payment_id в разных вариантах
-    payment_id = params.get("paymentId") or params.get("payment_id")
-    if not payment_id:
-        logger.error(f"Не найден payment_id в параметрах: {params}")
+    device_id = request.query_params.get("device_id")
+    if not device_id:
         return HTMLResponse("""
         <html>
         <head><meta charset="UTF-8"><title>Ошибка</title></head>
         <body style="text-align:center;padding:40px;font-family:Arial;">
             <h1 style="color:#ef4444;">Ошибка</h1>
-            <p>Не указан идентификатор платежа. Пожалуйста, проверьте URL.</p>
+            <p>Не указан идентификатор устройства. Пожалуйста, проверьте URL.</p>
         </body>
         </html>
         """)
 
-    license_key = await database.get_license_by_payment(payment_id)
+    license_key = await database.get_license_by_device(device_id)
 
     if not license_key:
         return HTMLResponse(f"""
@@ -396,12 +390,12 @@ async def success_page(request: Request):
 
             <script>
                 (async function() {{
-                    const paymentId = "{payment_id}";
+                    const deviceId = "{device_id}";
                     let attempts = 0;
                     const maxAttempts = 15;
                     while (attempts < maxAttempts) {{
                         try {{
-                            const resp = await fetch(`/api/get-license?payment_id=${{paymentId}}`);
+                            const resp = await fetch(`/api/get-license-by-device?device_id=${{deviceId}}`);
                             const data = await resp.json();
                             if (data.license_key) {{
                                 document.getElementById('licenseKey').textContent = data.license_key;
@@ -439,8 +433,15 @@ async def success_page(request: Request):
     </html>
     """)
 
-# ================= УДАЛЯЕМ ВСЁ, ЧТО СВЯЗАНО С РОБОКАССОЙ =================
-# (эндпоинты /robokassa/result и /robokassa/success удалены)
+@app.get("/api/get-license-by-device")
+@limiter.limit("10/minute")
+async def get_license_by_device(request: Request, device_id: str):
+    if not device_id:
+        raise HTTPException(400, "Не указан device_id")
+    license_key = await database.get_license_by_device(device_id)
+    if not license_key:
+        raise HTTPException(404, "Лицензия ещё не создана")
+    return {"license_key": license_key}
 
 # ================= ЛИЦЕНЗИИ =================
 @app.post("/api/create-order")
