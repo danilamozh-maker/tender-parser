@@ -277,6 +277,7 @@ async def updates_xml():
 async def create_payment(request: Request, data: dict = None):
     amount_value = data.get("amount", 2500) if data else 2500
     device_id = request.headers.get("X-Device-ID", "unknown")
+    email = data.get("email", "client@example.com") if data else "client@example.com"
 
     try:
         payment = Payment.create({
@@ -289,9 +290,27 @@ async def create_payment(request: Request, data: dict = None):
                 "return_url": f"https://csb24-tender.ru/success?payment_id={{id}}"
             },
             "capture": True,
-            "description": "Лицензия для Тендерного парсера",
+            "description": "Лицензия для Тендерного парсера (1 месяц)",
             "metadata": {
                 "device_id": device_id
+            },
+            "receipt": {
+                "customer": {
+                    "email": email
+                },
+                "items": [
+                    {
+                        "description": "Лицензия на использование Тендерного парсера (1 месяц)",
+                        "quantity": "1.00",
+                        "amount": {
+                            "value": str(amount_value),
+                            "currency": "RUB"
+                        },
+                        "vat_code": 4, # для УСН (доходы минус расходы) — НДС не облагается
+                        "payment_mode": "full_payment",
+                        "payment_subject": "service"
+                    }
+                ]
             }
         })
 
@@ -305,7 +324,7 @@ async def create_payment(request: Request, data: dict = None):
         }
     except Exception as e:
         logger.error(f"Ошибка создания платежа: {e}")
-        raise HTTPException(500, "Не удалось создать платёж")
+        raise HTTPException(500, f"Не удалось создать платёж: {str(e)}")
 
 @app.post("/yookassa-webhook")
 @limiter.limit("10/minute")
@@ -410,7 +429,6 @@ async def success_page(request: Request):
     </html>
     """)
 
-# ================= ИСПРАВЛЕННАЯ ФУНКЦИЯ (добавлен request) =================
 @app.get("/api/get-license")
 @limiter.limit("10/minute")
 async def get_license(request: Request, payment_id: str):
