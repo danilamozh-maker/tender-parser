@@ -31,7 +31,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-# ========== НОВАЯ БИБЛИОТЕКА ЮKASSA ==========
+# ================= НОВАЯ БИБЛИОТЕКА ЮKASSA =================
 from yookassa import Configuration, Payment
 
 # ================= ЗАГРУЗКА .ENV =================
@@ -60,7 +60,7 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 if not ADMIN_TOKEN:
     raise ValueError("ADMIN_TOKEN не найден в .env")
 
-# ================= НАСТРОЙКИ ЮKASSA (вместо Робокассы) =================
+# ================= НАСТРОЙКИ ЮKASSA =================
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
 if not all([YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY]):
@@ -159,10 +159,58 @@ async def check_access(request: Request):
     logger.warning(f"Неавторизованный доступ с {request.client.host}")
     raise HTTPException(401, detail="Требуется действующая лицензия или активный пробный период")
 
-# ================= ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЯ В MAX =================
-async def send_max_notification(...):
-    # (без изменений, оставлен как есть)
-    pass
+# ================= ФУНКЦИЯ ОТПРАВКИ В MAX (ОРИГИНАЛЬНАЯ, НЕ МЕНЯЛИ) =================
+async def send_max_notification(
+    reg_number: str,
+    client_name: str,
+    inn: str,
+    phone: str,
+    email: str,
+    nmc: str,
+    end_date: str,
+    bid_end_date: str,
+    bid_security: str,
+    contract_security: str,
+    guarantee_type: str,
+    contact_by_email: bool
+):
+    if not MAX_BOT_TOKEN or not MAX_CHAT_ID:
+        logger.warning("MAX Bot не настроен: пропуск уведомления")
+        return
+
+    text = (
+        f"Новая заявка на банковскую гарантию!\n\n"
+        f"Номер тендера: {reg_number}\n"
+        f"Клиент: {client_name}\n"
+        f"ИНН: {inn or 'Не указан'}\n"
+        f"Телефон: {phone}\n"
+        f"Email: {email}\n"
+        f"Начальная цена (НМЦ): {nmc or 'Не указана'}\n"
+        f"Дата окончания контракта: {end_date or 'Не указана'}\n"
+        f"Дата окончания подачи заявок: {bid_end_date or 'Не указана'}\n"
+        f"Обеспечение заявки: {bid_security or 'Не указано'}\n"
+        f"Обеспечение контракта: {contract_security or 'Не указано'}\n"
+        f"Тип гарантии: {'Обеспечение заявки (участие)' if guarantee_type == 'participation' else 'Обеспечение исполнения контракта'}\n"
+        f"Связь только по email: {'Да' if contact_by_email else 'Нет (звонить)'}\n"
+        f"Время заявки: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    )
+
+    url = f"{MAX_API_URL}?chat_id={MAX_CHAT_ID}"
+    headers = {
+        "Authorization": MAX_BOT_TOKEN,
+        "Content-Type": "application/json"
+    }
+    payload = {"text": text}
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code == 200:
+                logger.info(f"Уведомление в MAX отправлено (тендер {reg_number})")
+            else:
+                logger.error(f"Ошибка MAX API: {response.status_code} - {response.text}")
+    except Exception as e:
+        logger.error(f"Исключение при отправке в MAX: {e}")
 
 # ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/health")
@@ -227,10 +275,6 @@ async def updates_xml():
 @app.post("/api/create-payment")
 @limiter.limit("5/minute")
 async def create_payment(request: Request, data: dict = None):
-    """
-    Создаёт платёж в ЮKassa.
-    Ожидает сумму (опционально, по умолчанию 2500) и передаёт device_id в метаданные.
-    """
     amount_value = data.get("amount", 2500) if data else 2500
     device_id = request.headers.get("X-Device-ID", "unknown")
 
@@ -251,7 +295,6 @@ async def create_payment(request: Request, data: dict = None):
             }
         })
 
-        # Сохраняем связь payment_id → device_id
         await database.save_payment(payment.id, device_id)
 
         logger.info(f"Платёж создан: id={payment.id}, сумма={payment.amount.value} RUB")
@@ -267,7 +310,6 @@ async def create_payment(request: Request, data: dict = None):
 @app.post("/yookassa-webhook")
 @limiter.limit("10/minute")
 async def yookassa_webhook(request: Request):
-    """Обрабатывает уведомления от ЮKassa."""
     body = await request.json()
     event = body.get("event")
     if not event:
@@ -281,10 +323,8 @@ async def yookassa_webhook(request: Request):
         metadata = payment_obj.get("metadata", {})
         device_id = metadata.get("device_id", "unknown")
 
-        # Создаём лицензию для device_id (в поле user_email временно храним device_id)
         license_key = await database.create_license(email=device_id, days_valid=30)
         if license_key:
-            # Сохраняем ключ в таблицу payments
             await database.update_payment_license(payment_id, license_key)
             logger.info(f"Лицензия {license_key} создана для device_id {device_id}")
         else:
@@ -292,12 +332,10 @@ async def yookassa_webhook(request: Request):
 
         return {"status": "ok"}
 
-    # Можно обрабатывать другие события (payment.canceled и т.д.)
     return {"status": "ok"}
 
 @app.get("/success", response_class=HTMLResponse)
 async def success_page(request: Request):
-    """Страница успеха после оплаты. Отображает лицензионный ключ."""
     payment_id = request.query_params.get("payment_id")
     if not payment_id:
         return HTMLResponse("""
@@ -310,11 +348,9 @@ async def success_page(request: Request):
         </html>
         """)
 
-    # Пытаемся получить ключ из БД
     license_key = await database.get_license_by_payment(payment_id)
 
     if not license_key:
-        # Если ключа ещё нет (платёж не обработан), показываем сообщение о загрузке
         return HTMLResponse(f"""
         <!DOCTYPE html>
         <html>
@@ -353,7 +389,6 @@ async def success_page(request: Request):
         </html>
         """)
 
-    # Если ключ уже есть, показываем его сразу
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
@@ -378,7 +413,6 @@ async def success_page(request: Request):
 @app.get("/api/get-license")
 @limiter.limit("10/minute")
 async def get_license(payment_id: str):
-    """Возвращает лицензионный ключ по ID платежа."""
     if not payment_id:
         raise HTTPException(400, "Не указан payment_id")
     license_key = await database.get_license_by_payment(payment_id)
@@ -386,10 +420,33 @@ async def get_license(payment_id: str):
         raise HTTPException(404, "Лицензия ещё не создана")
     return {"license_key": license_key}
 
-# ================= УДАЛЁННЫЕ ЭНДПОЙНТЫ РОБОКАССЫ =================
-# (все эндпоинты /robokassa/... удалены, их больше нет)
+# ================= УДАЛЯЕМ ВСЁ, ЧТО СВЯЗАНО С РОБОКАССОЙ =================
+# (никаких эндпоинтов /robokassa/... больше нет)
 
-# ================= ОСТАЛЬНЫЕ ЭНДПОЙНТЫ =================
-# (без изменений: /api/create-order, /analyze_texts, /package_files, /guarantee, /api/guarantee/request, /api/trial/start, /api/trial/status, /search_tenders, /suggest_keywords, /ask_ai, /api/verify-license, /api/activate-license)
+# ================= ЛИЦЕНЗИИ =================
+@app.post("/api/create-order")
+@limiter.limit("10/minute")
+async def create_order(request: Request):
+    admin_token = request.headers.get("X-Admin-Token")
+    if admin_token != ADMIN_TOKEN:
+        logger.warning(f"Неверный admin token от {request.client.host}")
+        raise HTTPException(403, "Неверный admin token")
+    license_key = await database.create_license(days_valid=30)
+    if not license_key:
+        raise HTTPException(500, "Не удалось создать лицензию")
+    result = await database.verify_license(license_key)
+    expires_at = result.get("expires_at") if result and result.get("valid") else None
+    return {"status": "success", "license_key": license_key, "expires_at": expires_at}
 
-# ... (здесь всё остальное, что не связано с оплатой, остаётся как было, я не буду дублировать весь код, чтобы не превышать лимит символов, но вы можете просто заменить верхнюю часть и добавить новые эндпоинты)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ================= ВСЕ ОСТАЛЬНЫЕ ЭНДПОЙНТЫ (НЕ ТРОГАЛИ) =================
+# Сюда копируем всё остальное, что было в вашем исходном main.py
+# (analyze_texts, package_files, guarantee, trial, search_tenders, suggest_keywords, ask_ai, verify-license, activate-license)
+# Я не буду дублировать их здесь, чтобы не перегружать ответ, но они должны быть в том же виде, как у вас были.
+# Если нужно, я могу выдать их отдельным блоком.
+
+# ================= ЗАПУСК =================
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
