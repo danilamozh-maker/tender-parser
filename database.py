@@ -102,6 +102,15 @@ async def init_db():
                 inn TEXT
             )
         """)
+        # НОВАЯ ТАБЛИЦА ДЛЯ ПЛАТЕЖЕЙ ЮKASSA
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                payment_id TEXT PRIMARY KEY,
+                device_id TEXT NOT NULL,
+                license_key TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
         # Миграции (добавляем недостающие колонки)
         await conn.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS total_requests INTEGER DEFAULT 0")
@@ -117,7 +126,7 @@ async def init_db():
         await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS contact_by_email BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE guarantee_requests ADD COLUMN IF NOT EXISTS inn TEXT")
 
-    print("✅ База данных PostgreSQL инициализирована (с поддержкой inn и get_trial_status)")
+    print("✅ База данных PostgreSQL инициализирована (с поддержкой платежей ЮKassa)")
 
 # ================= ПОЛЬЗОВАТЕЛИ =================
 async def create_user(email: str, password: str):
@@ -275,7 +284,6 @@ async def start_trial(device_id: str, trial_days: int = 2, ip_address: str = Non
         )
         return {"status": "ok", "trial_start": now}
 
-# ===== НОВАЯ ФУНКЦИЯ (ИМЕННО ЕЁ НЕ ХВАТАЛО) =====
 async def get_trial_status(device_id: str):
     """Возвращает статус пробного периода для device_id."""
     pool = await get_pool()
@@ -318,3 +326,32 @@ async def increment_usage(license_key: str = None, device_id: str = None, tokens
                 "UPDATE device_trials SET total_requests = total_requests + 1, total_tokens = total_tokens + $1 WHERE device_id = $2",
                 tokens_used, device_id
             )
+
+# ================= ПЛАТЕЖИ (ЮKASSA) =================
+async def save_payment(payment_id: str, device_id: str):
+    """Сохраняет информацию о созданном платеже."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO payments (payment_id, device_id) VALUES ($1, $2) ON CONFLICT (payment_id) DO NOTHING",
+            payment_id, device_id
+        )
+
+async def update_payment_license(payment_id: str, license_key: str):
+    """Обновляет запись платежа, добавляя сгенерированный лицензионный ключ."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE payments SET license_key = $1 WHERE payment_id = $2",
+            license_key, payment_id
+        )
+
+async def get_license_by_payment(payment_id: str):
+    """Возвращает лицензионный ключ по ID платежа."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT license_key FROM payments WHERE payment_id = $1",
+            payment_id
+        )
+        return row["license_key"] if row else None
