@@ -13,17 +13,15 @@ from dotenv import load_dotenv
 from docx import Document
 import requests
 import httpx
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from urllib.parse import quote
 import openpyxl
 import xlrd
 import uvicorn
 import database
 import parser
-from bs4 import BeautifulSoup
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional
@@ -73,7 +71,6 @@ Configuration.secret_key = YOOKASSA_SECRET_KEY
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")
 MAX_CHAT_ID = os.getenv("MAX_CHAT_ID")
 MAX_API_URL = "https://platform-api2.max.ru/messages"
-
 if not all([MAX_BOT_TOKEN, MAX_CHAT_ID]):
     raise ValueError("MAX BOT настройки не найдены в .env")
 
@@ -149,13 +146,11 @@ async def check_access(request: Request):
         result = await database.verify_license(license_key)
         if result and result.get("valid"):
             return {"type": "license", "id": license_key}
-   
     device_id = request.headers.get("X-Device-ID")
     if device_id:
         is_active = await database.check_trial_by_device(device_id)
         if is_active:
             return {"type": "trial", "id": device_id}
-   
     logger.warning(f"Неавторизованный доступ с {request.client.host}")
     raise HTTPException(401, detail="Требуется действующая лицензия или активный пробный период")
 
@@ -238,11 +233,7 @@ async def download_oferta():
     file_path = os.path.join("static", "oferta.docx")
     if not os.path.exists(file_path):
         raise HTTPException(404, "Файл оферты не найден")
-    return FileResponse(
-        file_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename="oferta.docx"
-    )
+    return FileResponse(file_path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename="oferta.docx")
 
 @app.get("/privacy-policy", response_class=HTMLResponse)
 async def privacy_policy_page():
@@ -278,50 +269,32 @@ async def create_payment(request: Request, data: dict = None):
     amount_value = data.get("amount", 2500) if data else 2500
     device_id = request.headers.get("X-Device-ID", "unknown")
     email = data.get("email", "client@example.com") if data else "client@example.com"
-
     try:
         payment = Payment.create({
-            "amount": {
-                "value": str(amount_value),
-                "currency": "RUB"
-            },
+            "amount": {"value": str(amount_value), "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                "return_url": f"https://csb24-tender.ru/success?device_id={device_id}"
+                "return_url": f"https://csb24-tender.ru/success?device_id={device_id}",
+                "cancel_url": "https://csb24-tender.ru/"
             },
             "capture": True,
             "description": "Лицензия для Тендерного парсера (1 месяц)",
-            "metadata": {
-                "device_id": device_id
-            },
+            "metadata": {"device_id": device_id},
             "receipt": {
-                "customer": {
-                    "email": email
-                },
-                "items": [
-                    {
-                        "description": "Лицензия на использование Тендерного парсера (1 месяц)",
-                        "quantity": "1.00",
-                        "amount": {
-                            "value": str(amount_value),
-                            "currency": "RUB"
-                        },
-                        "vat_code": 4,
-                        "payment_mode": "full_payment",
-                        "payment_subject": "service"
-                    }
-                ]
+                "customer": {"email": email},
+                "items": [{
+                    "description": "Лицензия на использование Тендерного парсера (1 месяц)",
+                    "quantity": "1.00",
+                    "amount": {"value": str(amount_value), "currency": "RUB"},
+                    "vat_code": 4,
+                    "payment_mode": "full_payment",
+                    "payment_subject": "service"
+                }]
             }
         })
-
         await database.save_payment(payment.id, device_id)
-
         logger.info(f"Платёж создан: id={payment.id}, сумма={payment.amount.value} RUB")
-        return {
-            "id": payment.id,
-            "confirmation_url": payment.confirmation.confirmation_url,
-            "amount": payment.amount.value
-        }
+        return {"id": payment.id, "confirmation_url": payment.confirmation.confirmation_url, "amount": payment.amount.value}
     except Exception as e:
         logger.error(f"Ошибка создания платежа: {e}")
         raise HTTPException(500, f"Не удалось создать платёж: {str(e)}")
@@ -333,101 +306,73 @@ async def yookassa_webhook(request: Request):
     event = body.get("event")
     if not event:
         raise HTTPException(400, "Неверный запрос")
-
     logger.info(f"Получен вебхук: {event}")
-
     if event == "payment.succeeded":
         payment_obj = body["object"]
         payment_id = payment_obj["id"]
         metadata = payment_obj.get("metadata", {})
         device_id = metadata.get("device_id", "unknown")
-
         license_key = await database.create_license(email=device_id, days_valid=30)
         if license_key:
             await database.update_payment_license(payment_id, license_key)
             logger.info(f"Лицензия {license_key} создана для device_id {device_id}")
         else:
             logger.warning(f"Не удалось создать лицензию для {device_id}")
-
         return {"status": "ok"}
-
     return {"status": "ok"}
 
 @app.get("/success", response_class=HTMLResponse)
 async def success_page(request: Request):
     device_id = request.query_params.get("device_id")
     if not device_id:
-        return HTMLResponse("""
-        <html>
-        <head><meta charset="UTF-8"><title>Ошибка</title></head>
-        <body style="text-align:center;padding:40px;font-family:Arial;">
-            <h1 style="color:#ef4444;">Ошибка</h1>
-            <p>Не указан идентификатор устройства. Пожалуйста, проверьте URL.</p>
-        </body>
-        </html>
-        """)
-
+        return HTMLResponse("<html><body><h1>Ошибка</h1><p>Не указан идентификатор устройства.</p></body></html>")
+    if device_id == "unknown":
+        return HTMLResponse("<html><body><h1>Ошибка</h1><p>Идентификатор устройства не определён.</p></body></html>")
     license_key = await database.get_license_by_device(device_id)
-
     if not license_key:
         return HTMLResponse(f"""
         <!DOCTYPE html>
         <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>Оплата успешна</title>
-            <style>
-                body {{ font-family: Arial; text-align: center; padding: 40px; }}
-                .key {{ background: #f1f5f9; padding: 15px; border-radius: 8px; font-size: 20px; font-weight: bold; letter-spacing: 2px; }}
-            </style>
+        <head><meta charset="UTF-8"><title>Оплата успешна</title>
+        <style>body{{font-family:Arial;text-align:center;padding:40px}}.key{{background:#f1f5f9;padding:15px;border-radius:8px;font-size:20px;font-weight:bold;letter-spacing:2px}}</style>
         </head>
         <body>
-            <h1 style="color: #10b981;">✅ Оплата прошла успешно!</h1>
+            <h1 style="color:#10b981;">✅ Оплата прошла успешно!</h1>
             <p>Ваш лицензионный ключ:</p>
             <div class="key" id="licenseKey">Загрузка...</div>
-            <p style="margin-top: 20px;">Скопируйте его и вставьте в расширение.</p>
             <p><a href="/">На главную</a></p>
-
             <script>
-                (async function() {{
-                    const deviceId = "{device_id}";
-                    let attempts = 0;
-                    const maxAttempts = 15;
-                    while (attempts < maxAttempts) {{
-                        try {{
-                            const resp = await fetch(`/api/get-license-by-device?device_id=${{deviceId}}`);
-                            const data = await resp.json();
-                            if (data.license_key) {{
-                                document.getElementById('licenseKey').textContent = data.license_key;
+                (async function(){{
+                    const deviceId="{device_id}";
+                    let attempts=0;
+                    while(attempts<15){{
+                        try{{
+                            const resp=await fetch(`/api/get-license-by-device?device_id=${{deviceId}}`);
+                            const data=await resp.json();
+                            if(data.license_key){{
+                                document.getElementById('licenseKey').textContent=data.license_key;
                                 return;
                             }}
-                        }} catch (e) {{}}
+                        }}catch(e){{}}
                         attempts++;
-                        await new Promise(r => setTimeout(r, 2000));
+                        await new Promise(r=>setTimeout(r,2000));
                     }}
-                    document.getElementById('licenseKey').textContent = 'Не удалось получить ключ. Обратитесь в поддержку.';
+                    document.getElementById('licenseKey').textContent='Не удалось получить ключ. Обратитесь в поддержку.';
                 }})();
             </script>
         </body>
         </html>
         """)
-
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>Оплата успешна</title>
-        <style>
-            body {{ font-family: Arial; text-align: center; padding: 40px; }}
-            .key {{ background: #f1f5f9; padding: 15px; border-radius: 8px; font-size: 20px; font-weight: bold; letter-spacing: 2px; }}
-        </style>
+    <head><meta charset="UTF-8"><title>Оплата успешна</title>
+    <style>body{{font-family:Arial;text-align:center;padding:40px}}.key{{background:#f1f5f9;padding:15px;border-radius:8px;font-size:20px;font-weight:bold;letter-spacing:2px}}</style>
     </head>
     <body>
-        <h1 style="color: #10b981;">✅ Оплата прошла успешно!</h1>
+        <h1 style="color:#10b981;">✅ Оплата прошла успешно!</h1>
         <p>Ваш лицензионный ключ:</p>
         <div class="key">{license_key}</div>
-        <p style="margin-top: 20px;">Скопируйте его и вставьте в расширение.</p>
         <p><a href="/">На главную</a></p>
     </body>
     </html>
@@ -449,7 +394,6 @@ async def get_license_by_device(request: Request, device_id: str):
 async def create_order(request: Request):
     admin_token = request.headers.get("X-Admin-Token")
     if admin_token != ADMIN_TOKEN:
-        logger.warning(f"Неверный admin token от {request.client.host}")
         raise HTTPException(403, "Неверный admin token")
     license_key = await database.create_license(days_valid=30)
     if not license_key:
@@ -500,17 +444,9 @@ def read_excel(file_path):
 
 # ================= ЗАПРОСЫ К DEEPSEEK =================
 def query_deepseek(prompt, license_key=None, device_id=None):
-    messages = [
-        {"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
-        {"role": "user", "content": prompt}
-    ]
-    payload = {
-        "model": MODEL_NAME,
-        "messages": messages,
-        "temperature": 0.3,
-        "max_tokens": 2500,
-        "stream": False
-    }
+    messages = [{"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
+                {"role": "user", "content": prompt}]
+    payload = {"model": MODEL_NAME, "messages": messages, "temperature": 0.3, "max_tokens": 2500, "stream": False}
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     try:
         response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=60)
@@ -523,37 +459,15 @@ def query_deepseek(prompt, license_key=None, device_id=None):
         else:
             answer = f"Ошибка HTTP {response.status_code}: {response.text}"
         if license_key or device_id:
-            asyncio.create_task(database.increment_usage(
-                license_key=license_key,
-                device_id=device_id,
-                tokens_used=total_tokens
-            ))
+            asyncio.create_task(database.increment_usage(license_key=license_key, device_id=device_id, tokens_used=total_tokens))
         return answer
     except Exception as e:
         error_msg = f"Ошибка: {e}"
         if license_key or device_id:
-            asyncio.create_task(database.increment_usage(
-                license_key=license_key,
-                device_id=device_id,
-                tokens_used=0
-            ))
+            asyncio.create_task(database.increment_usage(license_key=license_key, device_id=device_id, tokens_used=0))
         return error_msg
 
-def analyze_file(file_path, selected_fields):
-    ext = Path(file_path).suffix.lower()
-    if ext == ".docx":
-        content = read_docx(file_path)
-    elif ext == ".txt":
-        content = read_txt(file_path)
-    elif ext in (".xlsx", ".xls"):
-        content = read_excel(file_path)
-    else:
-        return f"Неподдерживаемый формат: {ext}"
-    if not content or "Ошибка чтения" in content:
-        return f"Не удалось прочитать файл"
-    content = content[:30000]
-    if not content.strip():
-        return "Файл пустой"
+def analyze_tender_text(text, selected_fields, license_key=None, device_id=None, max_text_len=8000):
     if not selected_fields:
         selected_fields = [
             "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
@@ -561,30 +475,12 @@ def analyze_file(file_path, selected_fields):
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
     fields_str = "\n".join(f"{field}: " for field in selected_fields)
+    truncated = text[:max_text_len]
     prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
 Ответ должен быть строго в таком формате (каждый пункт с новой строки):
 {fields_str}
 Вот текст для анализа:
-{content}
-Извлеки данные и напиши в указанном формате."""
-    answer = query_deepseek(prompt)
-    lines = answer.split('\n')
-    filtered = [line for line in lines if any(line.strip().startswith(f) for f in selected_fields)]
-    return "\n".join(filtered) if filtered else answer
-
-def analyze_tender_text(text, selected_fields, license_key=None, device_id=None):
-    if not selected_fields:
-        selected_fields = [
-            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
-            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
-            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
-        ]
-    fields_str = "\n".join(f"{field}: " for field in selected_fields)
-    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
-Ответ должен быть строго в таком формате (каждый пункт с новой строки):
-{fields_str}
-Вот текст для анализа:
-{text[:8000]}
+{truncated}
 Извлеки данные и напиши в указанном формате."""
     answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
     result = {}
@@ -594,7 +490,22 @@ def analyze_tender_text(text, selected_fields, license_key=None, device_id=None)
             result[k.strip()] = v.strip()
     return result
 
-# ================= ЭНДПОЙНТ АНАЛИЗА ТЕНДЕРОВ =================
+def critical_analysis(text, license_key=None, device_id=None):
+    prompt = f"""Ты — эксперт по тендерной документации. Проанализируй текст тендера и выяви потенциальные риски, сложности, скрытые требования, которые могут помешать выполнению контракта. Оцени, насколько выполним данный тендер для среднестатистического поставщика.
+
+    Текст тендера:
+    {text[:15000]}
+
+    Ответ должен быть в виде связного текста (5–7 предложений), где будут перечислены:
+    - основные риски и сложности,
+    - неочевидные требования,
+    - рекомендации по успешному выполнению.
+    Не используй маркированные списки, пиши сплошным текстом.
+    """
+    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
+    return answer
+
+# ================= ЭНДПОЙНТ АНАЛИЗА ТЕКСТОВ (МАССОВЫЙ) =================
 @app.post("/analyze_texts")
 @limiter.limit("10/minute")
 async def analyze_texts(request: Request, data: AnalyzeRequest):
@@ -602,7 +513,6 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     tenders_data = data.tenders
     if not tenders_data:
         raise HTTPException(400, "Нет данных для анализа")
-   
     selected_fields = data.fields
     if not selected_fields:
         selected_fields = [
@@ -610,7 +520,6 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
             "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
-   
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
@@ -620,27 +529,15 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
         if cached:
             await database.increment_cache_usage(reg_number)
             logger.info(f"Кэш для {reg_number} использован")
-            return {
-                "url": tender.url,
-                "reg_number": reg_number,
-                "analysis": cached
-            }
+            return {"url": tender.url, "reg_number": reg_number, "analysis": cached}
         tender_text = tender.text
         if not tender_text or len(tender_text) < 100:
-            return {
-                "url": tender.url,
-                "reg_number": reg_number,
-                "error": "Недостаточно текста для анализа"
-            }
+            return {"url": tender.url, "reg_number": reg_number, "error": "Недостаточно текста для анализа"}
         start = time.time()
         analysis_result = analyze_tender_text(tender_text, selected_fields, license_key, device_id)
         await database.save_analysis_cache(reg_number, analysis_result)
         logger.info(f"DeepSeek обработал {reg_number} за {time.time()-start:.2f} сек")
-        return {
-            "url": tender.url,
-            "reg_number": reg_number,
-            "analysis": analysis_result
-        }
+        return {"url": tender.url, "reg_number": reg_number, "analysis": analysis_result}
 
     tasks = [analyze_one(t) for t in tenders_data]
     results = await asyncio.gather(*tasks)
@@ -665,19 +562,103 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     word_buffer = io.BytesIO()
     doc.save(word_buffer)
     word_buffer.seek(0)
-
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zf:
         zf.writestr(f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.docx', word_buffer.getvalue())
-
     zip_buffer.seek(0)
     filename = f'результаты_анализа_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     encoded = quote(filename)
-    return Response(
-        zip_buffer.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
-    )
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ =================
+@app.post("/analyze_tender_with_files")
+@limiter.limit("10/minute")
+async def analyze_tender_with_files(
+    request: Request,
+    regNumber: str = Form(...),
+    printFormText: str = Form(...),
+    fields: str = Form(...),
+    files: list[UploadFile] = File(...)
+):
+    await check_access(request)
+    selected_fields = json.loads(fields)
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+
+    combined_text = printFormText
+    file_contents = []
+    temp_dir = Path(f"/tmp/tender_{regNumber}_{datetime.now().strftime('%Y%m%d%H%M%S')}")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        for file in files:
+            file_path = temp_dir / file.filename
+            content = await file.read()
+            with open(file_path, "wb") as f:
+                f.write(content)
+            ext = file_path.suffix.lower()
+            if ext == ".docx":
+                text = read_docx(str(file_path))
+            elif ext == ".txt":
+                text = read_txt(str(file_path))
+            elif ext in (".xlsx", ".xls"):
+                text = read_excel(str(file_path))
+            else:
+                text = f"[Формат {ext} не поддерживается для извлечения текста]"
+            if text and not text.startswith("Ошибка"):
+                combined_text += f"\n\n--- Содержимое файла {file.filename} ---\n{text}"
+                file_contents.append((file.filename, text))
+            else:
+                file_contents.append((file.filename, f"⚠️ Не удалось прочитать файл: {text}"))
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    license_key = request.headers.get("X-License-Key")
+    device_id = request.headers.get("X-Device-ID")
+    analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=20000)
+    critical_result = critical_analysis(combined_text, license_key, device_id)
+    await database.save_analysis_cache(regNumber, analysis_result)
+
+    doc = Document()
+    doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРА', 0)
+    doc.add_paragraph(f'Номер тендера: {regNumber}')
+    doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
+    doc.add_paragraph('=' * 50)
+
+    doc.add_heading('Структурированный анализ', level=1)
+    if isinstance(analysis_result, dict):
+        for k, v in analysis_result.items():
+            doc.add_paragraph(f'{k}: {v}')
+    else:
+        doc.add_paragraph(str(analysis_result))
+
+    doc.add_page_break()
+    doc.add_heading('КРИТИЧЕСКИЙ АНАЛИЗ И РЕКОМЕНДАЦИИ', level=1)
+    doc.add_paragraph(critical_result if critical_result else "Не удалось выполнить критический анализ.")
+
+    if file_contents:
+        doc.add_page_break()
+        doc.add_heading('СОДЕРЖИМОЕ ПРИКРЕПЛЁННЫХ ДОКУМЕНТОВ', level=1)
+        for fname, content in file_contents:
+            doc.add_heading(f'Файл: {fname}', level=2)
+            if len(content) > 2000:
+                content = content[:2000] + '\n... (текст обрезан)'
+            doc.add_paragraph(content)
+
+    word_buffer = io.BytesIO()
+    doc.save(word_buffer)
+    word_buffer.seek(0)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zf:
+        zf.writestr(f'анализ_тендера_{regNumber}.docx', word_buffer.getvalue())
+    zip_buffer.seek(0)
+    filename = f'анализ_тендера_{regNumber}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+    encoded = quote(filename)
+    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
 # ================= УПАКОВКА ФАЙЛОВ =================
 def detect_file_type(content: bytes) -> str:
@@ -709,17 +690,14 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
         raise HTTPException(400, "Нет файлов")
     if len(files) > 100:
         raise HTTPException(400, "Слишком много файлов (макс. 100)")
-   
     tenders = {}
     total_size = 0
     max_total_size = 500 * 1024 * 1024
-   
     for file in files:
         content = await file.read()
         total_size += len(content)
         if total_size > max_total_size:
             raise HTTPException(400, "Общий размер файлов превышает 500 МБ")
-       
         parts = file.filename.split('_', 1)
         tender_id = parts[0] if len(parts) == 2 else "без_тендера"
         original_name = parts[1] if len(parts) == 2 else file.filename
@@ -738,7 +716,6 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
                 original_name = base + '.bin'
         logger.info(f"Тип: {file_type}, имя: {original_name}")
         tenders.setdefault(tender_id, []).append((original_name, content))
-   
     for tender_id, file_list in tenders.items():
         seen = set()
         new_list = []
@@ -752,7 +729,6 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
             seen.add(new_name)
             new_list.append((new_name, content))
         tenders[tender_id] = new_list
-   
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zf:
         for tender_id, file_list in tenders.items():
@@ -772,7 +748,6 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
             doc.save(word_buf)
             word_buf.seek(0)
             zf.writestr("анализ_тендеров.docx", word_buf.getvalue())
-   
     zip_buffer.seek(0)
     filename = f"результаты_анализа_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded = quote(filename)
@@ -805,10 +780,8 @@ async def guarantee_page(request: Request):
     reg_number = request.query_params.get("regNumber")
     if not reg_number:
         return HTMLResponse("<h1>Ошибка</h1><p>Не указан номер тендера.</p>")
-   
     if not reg_number.replace('-', '').replace('/', '').isalnum():
         raise HTTPException(400, "Некорректный номер тендера")
-   
     cached = await database.get_cached_analysis(reg_number)
     data = cached if cached else {}
 
@@ -869,7 +842,6 @@ async def guarantee_page(request: Request):
         <h1>Заявка на банковскую гарантию</h1>
         <form id="guaranteeForm" action="/api/guarantee/request" method="post">
             <input type="hidden" name="regNumber" value="{reg_number}">
-           
             <div class="field">
                 <label>Номер тендера</label>
                 <input type="text" value="{reg_number}" readonly>
@@ -922,7 +894,6 @@ async def guarantee_page(request: Request):
                 <input type="checkbox" name="contact_by_email" value="true">
                 <span>Не звонить мне, связываться только по email</span>
             </div>
-
             <div class="consent-block">
                 <label>
                     <input type="checkbox" id="consent_personal" name="consent_personal" required>
@@ -933,18 +904,15 @@ async def guarantee_page(request: Request):
                     Я принимаю условия <a href="https://csb24-tender.ru/offer" target="_blank">Пользовательского соглашения</a> и <a href="https://csb24-tender.ru/privacy-policy" target="_blank">Политики конфиденциальности</a>
                 </label>
             </div>
-
             <button type="submit" class="btn" id="submitBtn" disabled>Отправить заявку</button>
         </form>
         <div style="margin-top: 20px; font-size: 13px; color: #666;">
             <a href="/">На главную</a>
         </div>
-
         <script>
             const consentPersonal = document.getElementById('consent_personal');
             const consentTerms = document.getElementById('consent_terms');
             const submitBtn = document.getElementById('submitBtn');
-
             function checkConsents() {{
                 if (consentPersonal.checked && consentTerms.checked) {{
                     submitBtn.disabled = false;
@@ -952,7 +920,6 @@ async def guarantee_page(request: Request):
                     submitBtn.disabled = true;
                 }}
             }}
-
             consentPersonal.addEventListener('change', checkConsents);
             consentTerms.addEventListener('change', checkConsents);
         </script>
@@ -983,11 +950,9 @@ async def guarantee_request(
 ):
     if not consent_personal or not consent_terms:
         raise HTTPException(400, "Необходимо дать согласие на обработку персональных данных и принять условия")
-   
     inn_clean = inn.replace(' ', '').replace('-', '')
     if not inn_clean.isdigit() or len(inn_clean) not in [10, 12]:
         raise HTTPException(400, "Некорректный ИНН")
-   
     if '@' not in email or '.' not in email.split('@')[1]:
         raise HTTPException(400, "Некорректный email")
 
@@ -1065,15 +1030,12 @@ async def search_tenders(request: Request, data: dict):
         raise HTTPException(400, "Введите ключевые слова для поиска")
     if len(query) > 200:
         raise HTTPException(400, "Запрос слишком длинный")
-   
     tender_urls = parser.search_tenders_zakupki(query, limit)
     if not tender_urls:
         return {"detail": "Тендеры по вашему запросу не найдены"}
-   
     base_dir = f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(base_dir, exist_ok=True)
     results = []
-   
     try:
         for idx, tender_url in enumerate(tender_urls[:MAX_TENDERS], 1):
             tender_name = f"Тендер_{idx}"
@@ -1095,7 +1057,6 @@ async def search_tenders(request: Request, data: dict):
     finally:
         if os.path.exists(base_dir):
             shutil.rmtree(base_dir, ignore_errors=True)
-   
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zf:
         for res in results:
@@ -1108,7 +1069,6 @@ async def search_tenders(request: Request, data: dict):
             doc.save(word_buf)
             word_buf.seek(0)
             zf.writestr(f"{res['tender_name']}_результат.docx", word_buf.getvalue())
-   
     zip_buffer.seek(0)
     filename = f"тендеры_по_запросу_{query[:20]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     encoded = quote(filename)
@@ -1123,7 +1083,6 @@ async def suggest_keywords(request: Request, data: dict):
         raise HTTPException(400, "Описание не может быть пустым")
     if len(description) > 1000:
         raise HTTPException(400, "Описание слишком длинное")
-   
     prompt = f"""Ты — помощник по тендерам. Пользователь описал свою деятельность:
 "{description}"
 Выдели 5–7 ключевых слов для поиска тендеров на zakupki.gov.ru.
@@ -1142,7 +1101,6 @@ async def ask_ai(request: Request, data: dict):
         raise HTTPException(400, "Введите вопрос")
     if len(question) > 1000:
         raise HTTPException(400, "Вопрос слишком длинный")
-   
     prompt = f"""Ты — консультант по тендерам и бизнес-процессам. Ответь на вопрос пользователя чётко, по делу, без воды.
 Вопрос пользователя: {question}
 Дай ответ в виде текста (2-4 предложения), который будет полезен для бизнесу."""
