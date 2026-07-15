@@ -657,17 +657,31 @@ async def analyze_tender_with_files(
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
 # ================= УПАКОВКА ФАЙЛОВ =================
-def detect_file_type(content: bytes) -> str:
+def detect_file_type(content: bytes, filename: str = "") -> str:
+    ext = os.path.splitext(filename)[1].lower() if filename else ""
+
     # Сначала проверяем OLE (старые .doc, .xls)
     if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
-        # Проверяем, что внутри: если есть WorkBook или BOUNDSHEET — это xls, иначе doc
         if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
             return 'xls'
         return 'doc'
+
+    # Если расширение .doc, а сигнатура не OLE, но может быть docx, проверим zip
+    if ext == '.doc':
+        # Попробуем распарсить как docx (zip с word/)
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                if any(f.startswith('word/') for f in zf.namelist()):
+                    return 'docx'
+        except:
+            pass
+        # Если не docx, всё равно считаем doc, т.к. расширение .doc
+        return 'doc'
+
     if content.startswith(b'%PDF'):
         return 'pdf'
+
     if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
-        # Пробуем распаковать zip
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 files = zf.namelist()
@@ -678,6 +692,7 @@ def detect_file_type(content: bytes) -> str:
                 return 'zip'
         except:
             return 'zip'
+
     if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'):
         return 'rar'
     if content.startswith(b'7z\xbc\xaf\x27\x1c'):
@@ -688,6 +703,10 @@ def detect_file_type(content: bytes) -> str:
         return 'jpg'
     if content.startswith(b'{\\rtf'):
         return 'rtf'
+
+    # Если ничего не подошло, но расширение .doc, считаем doc
+    if ext == '.doc':
+        return 'doc'
     return 'unknown'
 
 @app.post("/package_files")
