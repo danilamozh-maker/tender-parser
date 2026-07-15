@@ -438,17 +438,15 @@ def read_excel(file_path):
         except Exception as e:
             return f"Ошибка чтения Excel: {e}"
 
-# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА (С УЧЁТОМ РАСШИРЕНИЯ) =================
+# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА =================
 def detect_file_type(content: bytes, filename: str = "") -> str:
     ext = os.path.splitext(filename)[1].lower() if filename else ""
 
-    # OLE (старые .doc, .xls)
     if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
         if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
             return 'xls'
         return 'doc'
 
-    # Если расширение .doc, даже если сигнатура похожа на zip, это doc или docx
     if ext == '.doc':
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
@@ -484,7 +482,6 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
     if content.startswith(b'{\\rtf'):
         return 'rtf'
 
-    # Если ничего не подошло, но расширение .doc, считаем doc
     if ext == '.doc':
         return 'doc'
     return 'unknown'
@@ -637,8 +634,7 @@ async def analyze_tender_with_files(
         ]
 
     combined_text = printFormText
-    file_contents = []
-    original_files = []
+    original_files = [] # только для сохранения исходных файлов, без текста
 
     temp_dir = Path(f"/tmp/tender_{regNumber}_{datetime.now().strftime('%Y%m%d%H%M%S')}")
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -647,7 +643,6 @@ async def analyze_tender_with_files(
         for file in files:
             content = await file.read()
 
-            # Определяем тип файла (с учётом имени)
             file_type = detect_file_type(content, file.filename)
             ext_map = {
                 'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
@@ -658,12 +653,10 @@ async def analyze_tender_with_files(
             base, old_ext = os.path.splitext(file.filename)
             corrected_filename = base + new_ext if new_ext else file.filename
 
-            # Сохраняем файл с правильным расширением на диск
             file_path = temp_dir / corrected_filename
             with open(file_path, "wb") as f:
                 f.write(content)
 
-            # Теперь расширение на диске соответствует реальному типу
             ext = file_path.suffix.lower()
             if ext == ".docx":
                 text = read_docx(str(file_path))
@@ -672,15 +665,14 @@ async def analyze_tender_with_files(
             elif ext in (".xlsx", ".xls"):
                 text = read_excel(str(file_path))
             else:
-                text = f"[Формат {ext} не поддерживается для извлечения текста]"
+                text = ""
 
             if text and not text.startswith("Ошибка"):
                 combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
-                file_contents.append((corrected_filename, text))
             else:
-                file_contents.append((corrected_filename, f"⚠️ Не удалось прочитать файл: {text}"))
+                # Если текст не извлечён, просто добавляем пометку в анализ, но в отчёт не выводим
+                pass
 
-            # Сохраняем для возврата в ZIP (с правильным именем)
             original_files.append((corrected_filename, content))
 
     finally:
@@ -688,7 +680,9 @@ async def analyze_tender_with_files(
 
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
-    analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=20000)
+
+    # ЛИМИТ УВЕЛИЧЕН ДО 100 000 СИМВОЛОВ
+    analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=100000)
     critical_result = critical_analysis(combined_text, license_key, device_id)
     await database.save_analysis_cache(regNumber, analysis_result)
 
@@ -709,14 +703,7 @@ async def analyze_tender_with_files(
     doc.add_heading('КРИТИЧЕСКИЙ АНАЛИЗ И РЕКОМЕНДАЦИИ', level=1)
     doc.add_paragraph(critical_result if critical_result else "Не удалось выполнить критический анализ.")
 
-    if file_contents:
-        doc.add_page_break()
-        doc.add_heading('СОДЕРЖИМОЕ ПРИКРЕПЛЁННЫХ ДОКУМЕНТОВ', level=1)
-        for fname, content in file_contents:
-            doc.add_heading(f'Файл: {fname}', level=2)
-            if len(content) > 2000:
-                content = content[:2000] + '\n... (текст обрезан)'
-            doc.add_paragraph(content)
+    # Удалён раздел с содержимым файлов — теперь он не выводится
 
     word_buffer = io.BytesIO()
     doc.save(word_buffer)
