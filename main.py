@@ -1154,11 +1154,14 @@ async def ask_ai(request: Request, data: dict):
 @app.post("/api/verify-license")
 @limiter.limit("10/minute")
 async def verify_license_endpoint(request: Request):
-    try:
-        await check_access(request)
-        return {"valid": True}
-    except HTTPException:
-        return {"valid": False, "reason": "Unauthorized"}
+    license_key = request.headers.get("X-License-Key")
+    if not license_key:
+        return {"valid": False, "reason": "No license key provided"}
+
+    result = await database.verify_license(license_key)
+    if result and result.get("valid"):
+        return {"valid": True, "expires_at": result.get("expires_at")}
+    return {"valid": False, "reason": "Invalid or expired"}
 
 @app.post("/api/activate-license")
 @limiter.limit("5/minute")
