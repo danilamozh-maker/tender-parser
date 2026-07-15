@@ -682,7 +682,7 @@ async def analyze_tender_with_files(
     device_id = request.headers.get("X-Device-ID")
 
     # ЛИМИТ УВЕЛИЧЕН ДО 100 000 СИМВОЛОВ
-    analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=100000)
+    analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=200000)
     critical_result = critical_analysis(combined_text, license_key, device_id)
     await database.save_analysis_cache(regNumber, analysis_result)
 
