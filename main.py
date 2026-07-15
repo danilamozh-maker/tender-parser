@@ -728,7 +728,7 @@ async def package_files(request: Request, files: list[UploadFile] = File(...), a
         parts = file.filename.split('_', 1)
         tender_id = parts[0] if len(parts) == 2 else "без_тендера"
         original_name = parts[1] if len(parts) == 2 else file.filename
-        file_type = detect_file_type(content)
+        file_type = detect_file_type(content, original_name)
         base = os.path.splitext(original_name)[0] or 'file'
         ext_map = {
             'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
