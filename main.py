@@ -593,48 +593,47 @@ async def analyze_tender_with_files(
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        for file in files:
-            file_path = temp_dir / file.filename
-            content = await file.read()
-            with open(file_path, "wb") as f:
-                f.write(content)
+    for file in files:
+        content = await file.read()
 
-            # Определяем тип файла (с учётом имени)
-            file_type = detect_file_type(content, file.filename)
-            # Подбираем правильное расширение
-            ext_map = {
-                'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
-                'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
-                'jpg': '.jpg', 'rtf': '.rtf', 'doc': '.doc'
-            }
-            new_ext = ext_map.get(file_type, '')
-            if new_ext:
-                base, old_ext = os.path.splitext(file.filename)
-                corrected_filename = base + new_ext
-            else:
-                corrected_filename = file.filename
+        # Определяем тип файла (с учётом имени)
+        file_type = detect_file_type(content, file.filename)
+        ext_map = {
+            'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
+            'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
+            'jpg': '.jpg', 'rtf': '.rtf', 'doc': '.doc'
+        }
+        new_ext = ext_map.get(file_type, '')
+        base, old_ext = os.path.splitext(file.filename)
+        corrected_filename = base + new_ext if new_ext else file.filename
 
-            # Сохраняем для возврата в ZIP (с правильным именем)
-            original_files.append((corrected_filename, content))
+        # Сохраняем файл с правильным расширением на диск
+        file_path = temp_dir / corrected_filename
+        with open(file_path, "wb") as f:
+            f.write(content)
 
-            # Извлекаем текст для анализа (поддерживаемые форматы)
-            ext = file_path.suffix.lower()
-            if ext == ".docx":
-                text = read_docx(str(file_path))
-            elif ext == ".txt":
-                text = read_txt(str(file_path))
-            elif ext in (".xlsx", ".xls"):
-                text = read_excel(str(file_path))
-            else:
-                text = f"[Формат {ext} не поддерживается для извлечения текста]"
+        # Теперь расширение на диске соответствует реальному типу
+        ext = file_path.suffix.lower()
+        if ext == ".docx":
+            text = read_docx(str(file_path))
+        elif ext == ".txt":
+            text = read_txt(str(file_path))
+        elif ext in (".xlsx", ".xls"):
+            text = read_excel(str(file_path))
+        else:
+            text = f"[Формат {ext} не поддерживается для извлечения текста]"
 
-            if text and not text.startswith("Ошибка"):
-                combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
-                file_contents.append((corrected_filename, text))
-            else:
-                file_contents.append((corrected_filename, f"⚠️ Не удалось прочитать файл: {text}"))
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if text and not text.startswith("Ошибка"):
+            combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
+            file_contents.append((corrected_filename, text))
+        else:
+            file_contents.append((corrected_filename, f"⚠️ Не удалось прочитать файл: {text}"))
+
+        # Сохраняем для возврата в ZIP (с правильным именем)
+        original_files.append((corrected_filename, content))
+
+finally:
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
