@@ -586,7 +586,9 @@ async def analyze_tender_with_files(
         ]
 
     combined_text = printFormText
-    file_contents = []
+    file_contents = [] # для содержимого текстовых документов
+    original_files = [] # для сохранения исходных файлов
+
     temp_dir = Path(f"/tmp/tender_{regNumber}_{datetime.now().strftime('%Y%m%d%H%M%S')}")
     temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -596,6 +598,26 @@ async def analyze_tender_with_files(
             content = await file.read()
             with open(file_path, "wb") as f:
                 f.write(content)
+
+            # Определяем тип файла (с учётом имени)
+            file_type = detect_file_type(content, file.filename)
+            # Подбираем правильное расширение
+            ext_map = {
+                'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
+                'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
+                'jpg': '.jpg', 'rtf': '.rtf', 'doc': '.doc'
+            }
+            new_ext = ext_map.get(file_type, '')
+            if new_ext:
+                base, old_ext = os.path.splitext(file.filename)
+                corrected_filename = base + new_ext
+            else:
+                corrected_filename = file.filename
+
+            # Сохраняем для возврата в ZIP (с правильным именем)
+            original_files.append((corrected_filename, content))
+
+            # Извлекаем текст для анализа (поддерживаемые форматы)
             ext = file_path.suffix.lower()
             if ext == ".docx":
                 text = read_docx(str(file_path))
@@ -605,11 +627,12 @@ async def analyze_tender_with_files(
                 text = read_excel(str(file_path))
             else:
                 text = f"[Формат {ext} не поддерживается для извлечения текста]"
+
             if text and not text.startswith("Ошибка"):
-                combined_text += f"\n\n--- Содержимое файла {file.filename} ---\n{text}"
-                file_contents.append((file.filename, text))
+                combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
+                file_contents.append((corrected_filename, text))
             else:
-                file_contents.append((file.filename, f"⚠️ Не удалось прочитать файл: {text}"))
+                file_contents.append((corrected_filename, f"⚠️ Не удалось прочитать файл: {text}"))
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -619,6 +642,7 @@ async def analyze_tender_with_files(
     critical_result = critical_analysis(combined_text, license_key, device_id)
     await database.save_analysis_cache(regNumber, analysis_result)
 
+    # Создаём DOCX-отчёт
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРА', 0)
     doc.add_paragraph(f'Номер тендера: {regNumber}')
@@ -648,25 +672,36 @@ async def analyze_tender_with_files(
     word_buffer = io.BytesIO()
     doc.save(word_buffer)
     word_buffer.seek(0)
+
+    # Формируем ZIP-архив: отчёт + все исходные файлы (с правильными именами)
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zf:
+        # Добавляем отчёт
         zf.writestr(f'анализ_тендера_{regNumber}.docx', word_buffer.getvalue())
+        # Добавляем исходные файлы
+        for fname, content in original_files:
+            zf.writestr(fname, content)
+
     zip_buffer.seek(0)
     filename = f'анализ_тендера_{regNumber}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     encoded = quote(filename)
-    return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
+    return Response(
+        zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+    )
 
 # ================= УПАКОВКА ФАЙЛОВ =================
 def detect_file_type(content: bytes, filename: str = "") -> str:
     ext = os.path.splitext(filename)[1].lower() if filename else ""
 
-    # Сначала проверяем OLE (старые .doc, .xls)
+    # OLE (старые .doc, .xls)
     if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
         if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
             return 'xls'
         return 'doc'
 
-    # Если расширение .doc, а сигнатура не OLE, но может быть docx, проверим zip
+    # Если расширение .doc, то даже если сигнатура похожа на zip, это doc или docx
     if ext == '.doc':
         # Попробуем распарсить как docx (zip с word/)
         try:
@@ -675,8 +710,7 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
                     return 'docx'
         except:
             pass
-        # Если не docx, всё равно считаем doc, т.к. расширение .doc
-        return 'doc'
+        return 'doc'  # принудительно doc
 
     if content.startswith(b'%PDF'):
         return 'pdf'
