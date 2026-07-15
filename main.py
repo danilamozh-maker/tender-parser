@@ -658,24 +658,36 @@ async def analyze_tender_with_files(
 
 # ================= УПАКОВКА ФАЙЛОВ =================
 def detect_file_type(content: bytes) -> str:
-    if content.startswith(b'%PDF'): return 'pdf'
+    # Сначала проверяем OLE (старые .doc, .xls)
+    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+        # Проверяем, что внутри: если есть WorkBook или BOUNDSHEET — это xls, иначе doc
+        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
+            return 'xls'
+        return 'doc'
+    if content.startswith(b'%PDF'):
+        return 'pdf'
     if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
+        # Пробуем распаковать zip
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 files = zf.namelist()
-                if any(f.startswith('word/') for f in files): return 'docx'
-                if any(f.startswith('xl/') for f in files): return 'xlsx'
+                if any(f.startswith('word/') for f in files):
+                    return 'docx'
+                if any(f.startswith('xl/') for f in files):
+                    return 'xlsx'
                 return 'zip'
         except:
             return 'zip'
-    if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'): return 'rar'
-    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
-        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]: return 'xls'
-        return 'doc'
-    if content.startswith(b'7z\xbc\xaf\x27\x1c'): return '7z'
-    if content.startswith(b'\x89PNG\r\n\x1a\n'): return 'png'
-    if content.startswith(b'\xff\xd8\xff'): return 'jpg'
-    if content.startswith(b'{\\rtf'): return 'rtf'
+    if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'):
+        return 'rar'
+    if content.startswith(b'7z\xbc\xaf\x27\x1c'):
+        return '7z'
+    if content.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png'
+    if content.startswith(b'\xff\xd8\xff'):
+        return 'jpg'
+    if content.startswith(b'{\\rtf'):
+        return 'rtf'
     return 'unknown'
 
 @app.post("/package_files")
