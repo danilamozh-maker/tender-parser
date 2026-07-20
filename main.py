@@ -638,12 +638,14 @@ async def analyze_tender_with_files(
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
 
-    # Получаем лицензионный ключ и информацию о промпте
-    license_key = request.headers.get("X-License-Key", "не указан")
-    device_id = request.headers.get("X-Device-ID", "неизвестен")
-    prompt_info = "стандартный"
+    # Получаем device_id и license_key только для передачи в анализ (не для отчёта)
+    device_id = request.headers.get("X-Device-ID", "unknown")
+    license_key = request.headers.get("X-License-Key", None)
+
+    # Определяем тип промпта для отчёта
+    prompt_info = "стандартного"
     if custom_critical_prompt and custom_critical_prompt.strip():
-        prompt_info = "ваш личный промпт"
+        prompt_info = "вашего личного"
 
     combined_text = printFormText
     original_files = []
@@ -692,13 +694,12 @@ async def analyze_tender_with_files(
     critical_result = critical_analysis(combined_text, license_key, device_id, custom_prompt=custom_critical_prompt)
     await database.save_analysis_cache(regNumber, analysis_result)
 
-    # Формируем DOCX-отчёт с добавленной информацией
+    # Формируем DOCX-отчёт
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРА', 0)
 
-    # Добавляем информацию о лицензии и промпте
-    doc.add_paragraph(f'Номер лицензионного ключа: {license_key}')
-    doc.add_paragraph(f'Анализ проведён с использованием {prompt_info}')
+    # Добавляем информацию о промпте
+    doc.add_paragraph(f'Анализ проведён с использованием {prompt_info} промпта.')
     doc.add_paragraph(f'Номер тендера: {regNumber}')
     doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
     doc.add_paragraph('=' * 50)
