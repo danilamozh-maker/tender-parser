@@ -374,7 +374,7 @@ async def success_page(request: Request):
     </html>
     """)
 
-@app.get("/api-get-license-by-device")
+@app.get("/api/get-license-by-device")
 @limiter.limit("10/minute")
 async def get_license_by_device(request: Request, device_id: str):
     if not device_id:
@@ -493,7 +493,7 @@ def query_deepseek(prompt, license_key=None, device_id=None):
     payload = {"model": MODEL_NAME, "messages": messages, "temperature": 0.3, "max_tokens": 2500, "stream": False}
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     try:
-        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=60)
+        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=180) # увеличен таймаут
         total_tokens = 0
         if response.status_code == 200:
             result = response.json()
@@ -629,7 +629,15 @@ async def analyze_tender_with_files(
     files: list[UploadFile] = File(...),
     custom_critical_prompt: str = Form("")
 ):
-    await check_access(request)
+    start_total = time.time()
+    logger.info(f"🚀 [START] Тендер {regNumber}, файлов: {len(files)}")
+
+    try:
+        await check_access(request)
+    except Exception as e:
+        logger.error(f"❌ [ACCESS] Ошибка доступа для {regNumber}: {e}")
+        raise
+
     selected_fields = json.loads(fields)
     if not selected_fields:
         selected_fields = [
@@ -638,7 +646,6 @@ async def analyze_tender_with_files(
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
 
-    # Получаем device_id и license_key только для передачи в анализ (не для отчёта)
     device_id = request.headers.get("X-Device-ID", "unknown")
     license_key = request.headers.get("X-License-Key", None)
 
@@ -654,7 +661,9 @@ async def analyze_tender_with_files(
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        for file in files:
+        start_files = time.time()
+        for idx, file in enumerate(files):
+            logger.info(f"📄 [FILE] Обработка файла {idx+1}/{len(files)}: {file.filename}")
             content = await file.read()
 
             file_type = detect_file_type(content, file.filename)
@@ -672,33 +681,59 @@ async def analyze_tender_with_files(
                 f.write(content)
 
             ext = file_path.suffix.lower()
+            text = ""
             if ext == ".docx":
-                text = read_docx(str(file_path))
+                try:
+                    text = read_docx(str(file_path))
+                except Exception as e:
+                    logger.error(f"❌ [DOCX] Ошибка чтения {file.filename}: {e}")
+                    text = f"[Ошибка чтения DOCX: {e}]"
             elif ext == ".txt":
                 text = read_txt(str(file_path))
             elif ext in (".xlsx", ".xls"):
-                text = read_excel(str(file_path))
+                try:
+                    text = read_excel(str(file_path))
+                except Exception as e:
+                    logger.error(f"❌ [EXCEL] Ошибка чтения {file.filename}: {e}")
+                    text = f"[Ошибка чтения Excel: {e}]"
             else:
                 text = ""
 
-            if text and not text.startswith("Ошибка"):
+            if text and not text.startswith("Ошибка") and not text.startswith("[Ошибка"):
                 combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
 
             original_files.append((corrected_filename, content))
 
+        logger.info(f"⏱ [FILES] Обработка файлов завершена за {time.time() - start_files:.2f} сек")
+
+    except Exception as e:
+        logger.error(f"❌ [FILES] Критическая ошибка при обработке файлов: {e}")
+        raise
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     # Анализ
-    analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=100000)
-    critical_result = critical_analysis(combined_text, license_key, device_id, custom_prompt=custom_critical_prompt)
+    start_analysis = time.time()
+    logger.info(f"🧠 [AI] Начало анализа текста для {regNumber}, длина: {len(combined_text)} символов")
+    try:
+        analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=100000)
+    except Exception as e:
+        logger.error(f"❌ [AI] Ошибка при структурированном анализе: {e}")
+        raise
+
+    try:
+        critical_result = critical_analysis(combined_text, license_key, device_id, custom_prompt=custom_critical_prompt)
+    except Exception as e:
+        logger.error(f"❌ [AI] Ошибка при критическом анализе: {e}")
+        raise
+
+    logger.info(f"⏱ [AI] Анализ завершён за {time.time() - start_analysis:.2f} сек")
+
     await database.save_analysis_cache(regNumber, analysis_result)
 
     # Формируем DOCX-отчёт
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРА', 0)
-
-    # Добавляем информацию о промпте
     doc.add_paragraph(f'Анализ проведён с использованием {prompt_info} промпта.')
     doc.add_paragraph(f'Номер тендера: {regNumber}')
     doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
@@ -728,6 +763,8 @@ async def analyze_tender_with_files(
     zip_buffer.seek(0)
     filename = f'анализ_тендера_{regNumber}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     encoded = quote(filename)
+
+    logger.info(f"✅ [DONE] Тендер {regNumber} полностью обработан за {time.time() - start_total:.2f} сек")
     return Response(
         zip_buffer.getvalue(),
         media_type="application/zip",
