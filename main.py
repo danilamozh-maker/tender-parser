@@ -374,7 +374,7 @@ async def success_page(request: Request):
     </html>
     """)
 
-@app.get("/api/get-license-by-device")
+@app.get("/api-get-license-by-device")
 @limiter.limit("10/minute")
 async def get_license_by_device(request: Request, device_id: str):
     if not device_id:
@@ -534,11 +534,15 @@ def analyze_tender_text(text, selected_fields, license_key=None, device_id=None,
             result[k.strip()] = v.strip()
     return result
 
-def critical_analysis(text, license_key=None, device_id=None):
-    prompt = f"""Ты — эксперт по тендерной документации. Проанализируй текст тендера и выяви потенциальные риски, сложности, скрытые требования, которые могут помешать выполнению контракта. Оцени, насколько выполним данный тендер для среднестатистического поставщика.
+def critical_analysis(text, license_key=None, device_id=None, custom_prompt=None):
+    if custom_prompt and custom_prompt.strip():
+        prompt = custom_prompt.strip()
+        prompt += f"\n\nТекст тендера и прикреплённых документов:\n{text}"
+    else:
+        prompt = f"""Ты — эксперт по тендерной документации. Проанализируй текст тендера и выяви потенциальные риски, сложности, скрытые требования, которые могут помешать выполнению контракта. Оцени, насколько выполним данный тендер для среднестатистического поставщика.
 
-    Текст тендера:
-    {text[:15000]}
+    Текст тендера и документов:
+    {text}
 
     Ответ должен быть в виде связного текста (5–7 предложений), где будут перечислены:
     - основные риски и сложности,
@@ -614,7 +618,7 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ =================
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ (ОБНОВЛЁННЫЙ) =================
 @app.post("/analyze_tender_with_files")
 @limiter.limit("10/minute")
 async def analyze_tender_with_files(
@@ -622,7 +626,8 @@ async def analyze_tender_with_files(
     regNumber: str = Form(...),
     printFormText: str = Form(...),
     fields: str = Form(...),
-    files: list[UploadFile] = File(...)
+    files: list[UploadFile] = File(...),
+    custom_critical_prompt: str = Form("")
 ):
     await check_access(request)
     selected_fields = json.loads(fields)
@@ -633,8 +638,15 @@ async def analyze_tender_with_files(
             "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
         ]
 
+    # Получаем лицензионный ключ и информацию о промпте
+    license_key = request.headers.get("X-License-Key", "не указан")
+    device_id = request.headers.get("X-Device-ID", "неизвестен")
+    prompt_info = "стандартный"
+    if custom_critical_prompt and custom_critical_prompt.strip():
+        prompt_info = "ваш личный промпт"
+
     combined_text = printFormText
-    original_files = [] # только для сохранения исходных файлов, без текста
+    original_files = []
 
     temp_dir = Path(f"/tmp/tender_{regNumber}_{datetime.now().strftime('%Y%m%d%H%M%S')}")
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -669,25 +681,24 @@ async def analyze_tender_with_files(
 
             if text and not text.startswith("Ошибка"):
                 combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
-            else:
-                # Если текст не извлечён, просто добавляем пометку в анализ, но в отчёт не выводим
-                pass
 
             original_files.append((corrected_filename, content))
 
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    license_key = request.headers.get("X-License-Key")
-    device_id = request.headers.get("X-Device-ID")
-
-    # ЛИМИТ УВЕЛИЧЕН ДО 100 000 СИМВОЛОВ
-    analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=200000)
-    critical_result = critical_analysis(combined_text, license_key, device_id)
+    # Анализ
+    analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=100000)
+    critical_result = critical_analysis(combined_text, license_key, device_id, custom_prompt=custom_critical_prompt)
     await database.save_analysis_cache(regNumber, analysis_result)
 
+    # Формируем DOCX-отчёт с добавленной информацией
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРА', 0)
+
+    # Добавляем информацию о лицензии и промпте
+    doc.add_paragraph(f'Номер лицензионного ключа: {license_key}')
+    doc.add_paragraph(f'Анализ проведён с использованием {prompt_info}')
     doc.add_paragraph(f'Номер тендера: {regNumber}')
     doc.add_paragraph(f'Дата: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}')
     doc.add_paragraph('=' * 50)
@@ -702,8 +713,6 @@ async def analyze_tender_with_files(
     doc.add_page_break()
     doc.add_heading('КРИТИЧЕСКИЙ АНАЛИЗ И РЕКОМЕНДАЦИИ', level=1)
     doc.add_paragraph(critical_result if critical_result else "Не удалось выполнить критический анализ.")
-
-    # Удалён раздел с содержимым файлов — теперь он не выводится
 
     word_buffer = io.BytesIO()
     doc.save(word_buffer)
