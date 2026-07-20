@@ -204,7 +204,7 @@ async def send_max_notification(
     except Exception as e:
         logger.error(f"Исключение при отправке в MAX: {e}")
 
-# ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ (ВКЛЮЧАЯ PDF) =================
+# ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
 def read_docx(file_path):
     try:
         doc = Document(file_path)
@@ -250,8 +250,12 @@ def read_pdf(file_path):
                 page_text = page.extract_text()
                 if page_text:
                     text += page_text + "\n"
-        return text.strip() if text.strip() else "PDF не содержит текста (возможно, сканированный документ)"
+        text = text.strip()
+        if not text:
+            logger.info(f"⚠️ [PDF] {file_path} не содержит текста (возможно, сканированный)")
+        return text if text else "PDF не содержит текста (возможно, сканированный документ)"
     except Exception as e:
+        logger.error(f"❌ [PDF] Ошибка при открытии {file_path}: {e}")
         return f"Ошибка чтения PDF: {e}"
 
 # ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА =================
@@ -700,20 +704,28 @@ async def analyze_tender_with_files(
                 except Exception as e:
                     logger.error(f"❌ [DOCX] Ошибка чтения {file.filename}: {e}")
                     text = f"[Ошибка чтения DOCX: {e}]"
+                else:
+                    logger.info(f"📄 [DOCX] {file.filename} -> {len(text)} символов извлечено")
             elif ext == ".txt":
                 text = read_txt(str(file_path))
+                if text:
+                    logger.info(f"📄 [TXT] {file.filename} -> {len(text)} символов извлечено")
             elif ext in (".xlsx", ".xls"):
                 try:
                     text = read_excel(str(file_path))
                 except Exception as e:
                     logger.error(f"❌ [EXCEL] Ошибка чтения {file.filename}: {e}")
                     text = f"[Ошибка чтения Excel: {e}]"
+                else:
+                    logger.info(f"📄 [EXCEL] {file.filename} -> {len(text)} символов извлечено")
             elif ext == ".pdf":
                 try:
                     text = read_pdf(str(file_path))
                 except Exception as e:
                     logger.error(f"❌ [PDF] Ошибка чтения {file.filename}: {e}")
                     text = f"[Ошибка чтения PDF: {e}]"
+                else:
+                    logger.info(f"📄 [PDF] {file.filename} -> {len(text)} символов извлечено")
             else:
                 text = ""
 
