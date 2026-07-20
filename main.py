@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from docx import Document
 import requests
 import httpx
+import pdfplumber
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -202,6 +203,171 @@ async def send_max_notification(
                 logger.error(f"Ошибка MAX API: {response.status_code} - {response.text}")
     except Exception as e:
         logger.error(f"Исключение при отправке в MAX: {e}")
+
+# ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ (ВКЛЮЧАЯ PDF) =================
+def read_docx(file_path):
+    try:
+        doc = Document(file_path)
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    except Exception as e:
+        return f"Ошибка чтения docx: {e}"
+
+def read_txt(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except:
+        try:
+            with open(file_path, 'r', encoding='cp1251') as f:
+                return f.read()
+        except Exception as e:
+            return f"Ошибка чтения txt: {e}"
+
+def read_excel(file_path):
+    try:
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        sheet = wb.active
+        rows = sheet.iter_rows(values_only=True)
+        return "\n".join(str(cell) for row in rows for cell in row if cell)
+    except:
+        try:
+            wb = xlrd.open_workbook(file_path)
+            sheet = wb.sheet_by_index(0)
+            text = ""
+            for row in range(sheet.nrows):
+                row_text = [str(sheet.cell_value(row, col)) for col in range(sheet.ncols) if sheet.cell_value(row, col)]
+                if row_text:
+                    text += " ".join(row_text) + "\n"
+            return text
+        except Exception as e:
+            return f"Ошибка чтения Excel: {e}"
+
+def read_pdf(file_path):
+    try:
+        text = ""
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        return text.strip() if text.strip() else "PDF не содержит текста (возможно, сканированный документ)"
+    except Exception as e:
+        return f"Ошибка чтения PDF: {e}"
+
+# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА =================
+def detect_file_type(content: bytes, filename: str = "") -> str:
+    ext = os.path.splitext(filename)[1].lower() if filename else ""
+
+    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
+            return 'xls'
+        return 'doc'
+
+    if ext == '.doc':
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                if any(f.startswith('word/') for f in zf.namelist()):
+                    return 'docx'
+        except:
+            pass
+        return 'doc'
+
+    if content.startswith(b'%PDF'):
+        return 'pdf'
+
+    if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                files = zf.namelist()
+                if any(f.startswith('word/') for f in files):
+                    return 'docx'
+                if any(f.startswith('xl/') for f in files):
+                    return 'xlsx'
+                return 'zip'
+        except:
+            return 'zip'
+
+    if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'):
+        return 'rar'
+    if content.startswith(b'7z\xbc\xaf\x27\x1c'):
+        return '7z'
+    if content.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png'
+    if content.startswith(b'\xff\xd8\xff'):
+        return 'jpg'
+    if content.startswith(b'{\\rtf'):
+        return 'rtf'
+
+    if ext == '.doc':
+        return 'doc'
+    return 'unknown'
+
+# ================= ЗАПРОСЫ К DEEPSEEK =================
+def query_deepseek(prompt, license_key=None, device_id=None):
+    messages = [{"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
+                {"role": "user", "content": prompt}]
+    payload = {"model": MODEL_NAME, "messages": messages, "temperature": 0.3, "max_tokens": 2500, "stream": False}
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    try:
+        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=180)
+        total_tokens = 0
+        if response.status_code == 200:
+            result = response.json()
+            usage = result.get("usage", {})
+            total_tokens = usage.get("total_tokens", 0)
+            answer = result["choices"][0]["message"]["content"]
+        else:
+            answer = f"Ошибка HTTP {response.status_code}: {response.text}"
+        if license_key or device_id:
+            asyncio.create_task(database.increment_usage(license_key=license_key, device_id=device_id, tokens_used=total_tokens))
+        return answer
+    except Exception as e:
+        error_msg = f"Ошибка: {e}"
+        if license_key or device_id:
+            asyncio.create_task(database.increment_usage(license_key=license_key, device_id=device_id, tokens_used=0))
+        return error_msg
+
+def analyze_tender_text(text, selected_fields, license_key=None, device_id=None, max_text_len=8000):
+    if not selected_fields:
+        selected_fields = [
+            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
+            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
+            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
+        ]
+    fields_str = "\n".join(f"{field}: " for field in selected_fields)
+    truncated = text[:max_text_len]
+    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
+Ответ должен быть строго в таком формате (каждый пункт с новой строки):
+{fields_str}
+Вот текст для анализа:
+{truncated}
+Извлеки данные и напиши в указанном формате."""
+    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
+    result = {}
+    for line in answer.split('\n'):
+        if ':' in line:
+            k, v = line.split(':', 1)
+            result[k.strip()] = v.strip()
+    return result
+
+def critical_analysis(text, license_key=None, device_id=None, custom_prompt=None):
+    if custom_prompt and custom_prompt.strip():
+        prompt = custom_prompt.strip()
+        prompt += f"\n\nТекст тендера и прикреплённых документов:\n{text}"
+    else:
+        prompt = f"""Ты — эксперт по тендерной документации. Проанализируй текст тендера и выяви потенциальные риски, сложности, скрытые требования, которые могут помешать выполнению контракта. Оцени, насколько выполним данный тендер для среднестатистического поставщика.
+
+    Текст тендера и документов:
+    {text}
+
+    Ответ должен быть в виде связного текста (5–7 предложений), где будут перечислены:
+    - основные риски и сложности,
+    - неочевидные требования,
+    - рекомендации по успешному выполнению.
+    Не используй маркированные списки, пиши сплошным текстом.
+    """
+    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
+    return answer
 
 # ================= ЭНДПОЙНТЫ HEALTH CHECK =================
 @app.get("/health")
@@ -400,159 +566,6 @@ async def create_order(request: Request):
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ================= ФУНКЦИИ ЧТЕНИЯ ФАЙЛОВ =================
-def read_docx(file_path):
-    try:
-        doc = Document(file_path)
-        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-    except Exception as e:
-        return f"Ошибка чтения docx: {e}"
-
-def read_txt(file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except:
-        try:
-            with open(file_path, 'r', encoding='cp1251') as f:
-                return f.read()
-        except Exception as e:
-            return f"Ошибка чтения txt: {e}"
-
-def read_excel(file_path):
-    try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
-        sheet = wb.active
-        rows = sheet.iter_rows(values_only=True)
-        return "\n".join(str(cell) for row in rows for cell in row if cell)
-    except:
-        try:
-            wb = xlrd.open_workbook(file_path)
-            sheet = wb.sheet_by_index(0)
-            text = ""
-            for row in range(sheet.nrows):
-                row_text = [str(sheet.cell_value(row, col)) for col in range(sheet.ncols) if sheet.cell_value(row, col)]
-                if row_text:
-                    text += " ".join(row_text) + "\n"
-            return text
-        except Exception as e:
-            return f"Ошибка чтения Excel: {e}"
-
-# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА =================
-def detect_file_type(content: bytes, filename: str = "") -> str:
-    ext = os.path.splitext(filename)[1].lower() if filename else ""
-
-    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
-        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
-            return 'xls'
-        return 'doc'
-
-    if ext == '.doc':
-        try:
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                if any(f.startswith('word/') for f in zf.namelist()):
-                    return 'docx'
-        except:
-            pass
-        return 'doc'
-
-    if content.startswith(b'%PDF'):
-        return 'pdf'
-
-    if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
-        try:
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                files = zf.namelist()
-                if any(f.startswith('word/') for f in files):
-                    return 'docx'
-                if any(f.startswith('xl/') for f in files):
-                    return 'xlsx'
-                return 'zip'
-        except:
-            return 'zip'
-
-    if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'):
-        return 'rar'
-    if content.startswith(b'7z\xbc\xaf\x27\x1c'):
-        return '7z'
-    if content.startswith(b'\x89PNG\r\n\x1a\n'):
-        return 'png'
-    if content.startswith(b'\xff\xd8\xff'):
-        return 'jpg'
-    if content.startswith(b'{\\rtf'):
-        return 'rtf'
-
-    if ext == '.doc':
-        return 'doc'
-    return 'unknown'
-
-# ================= ЗАПРОСЫ К DEEPSEEK =================
-def query_deepseek(prompt, license_key=None, device_id=None):
-    messages = [{"role": "system", "content": "Ты — эксперт по анализу тендерной документации. Отвечай чётко, по делу, без воды."},
-                {"role": "user", "content": prompt}]
-    payload = {"model": MODEL_NAME, "messages": messages, "temperature": 0.3, "max_tokens": 2500, "stream": False}
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    try:
-        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=180) # увеличен таймаут
-        total_tokens = 0
-        if response.status_code == 200:
-            result = response.json()
-            usage = result.get("usage", {})
-            total_tokens = usage.get("total_tokens", 0)
-            answer = result["choices"][0]["message"]["content"]
-        else:
-            answer = f"Ошибка HTTP {response.status_code}: {response.text}"
-        if license_key or device_id:
-            asyncio.create_task(database.increment_usage(license_key=license_key, device_id=device_id, tokens_used=total_tokens))
-        return answer
-    except Exception as e:
-        error_msg = f"Ошибка: {e}"
-        if license_key or device_id:
-            asyncio.create_task(database.increment_usage(license_key=license_key, device_id=device_id, tokens_used=0))
-        return error_msg
-
-def analyze_tender_text(text, selected_fields, license_key=None, device_id=None, max_text_len=8000):
-    if not selected_fields:
-        selected_fields = [
-            "НАЗВАНИЕ АУКЦИОНА", "Начальная цена (НМЦ)", "ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ К УЧАСТНИКУ",
-            "ДАТА ОКОНЧАНИЯ/ПРОВЕДЕНИЯ", "Аванс", "Обеспечение заявки", "Обеспечение контракта",
-            "Обеспечение гарантийных обязательств", "Контакты", "Место исполнения", "ДАТА ОКОНЧАНИЯ КОНТРАКТА"
-        ]
-    fields_str = "\n".join(f"{field}: " for field in selected_fields)
-    truncated = text[:max_text_len]
-    prompt = f"""Ты анализируешь тендерную документацию. Извлеки из текста следующие данные. Если информации нет, напиши "Информация отсутствует".
-Ответ должен быть строго в таком формате (каждый пункт с новой строки):
-{fields_str}
-Вот текст для анализа:
-{truncated}
-Извлеки данные и напиши в указанном формате."""
-    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
-    result = {}
-    for line in answer.split('\n'):
-        if ':' in line:
-            k, v = line.split(':', 1)
-            result[k.strip()] = v.strip()
-    return result
-
-def critical_analysis(text, license_key=None, device_id=None, custom_prompt=None):
-    if custom_prompt and custom_prompt.strip():
-        prompt = custom_prompt.strip()
-        prompt += f"\n\nТекст тендера и прикреплённых документов:\n{text}"
-    else:
-        prompt = f"""Ты — эксперт по тендерной документации. Проанализируй текст тендера и выяви потенциальные риски, сложности, скрытые требования, которые могут помешать выполнению контракта. Оцени, насколько выполним данный тендер для среднестатистического поставщика.
-
-    Текст тендера и документов:
-    {text}
-
-    Ответ должен быть в виде связного текста (5–7 предложений), где будут перечислены:
-    - основные риски и сложности,
-    - неочевидные требования,
-    - рекомендации по успешному выполнению.
-    Не используй маркированные списки, пиши сплошным текстом.
-    """
-    answer = query_deepseek(prompt, license_key=license_key, device_id=device_id)
-    return answer
-
 # ================= ЭНДПОЙНТ АНАЛИЗА ТЕКСТОВ (МАССОВЫЙ) =================
 @app.post("/analyze_texts")
 @limiter.limit("10/minute")
@@ -618,7 +631,7 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ (ОБНОВЛЁННЫЙ) =================
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ =================
 @app.post("/analyze_tender_with_files")
 @limiter.limit("10/minute")
 async def analyze_tender_with_files(
@@ -649,7 +662,6 @@ async def analyze_tender_with_files(
     device_id = request.headers.get("X-Device-ID", "unknown")
     license_key = request.headers.get("X-License-Key", None)
 
-    # Определяем тип промпта для отчёта
     prompt_info = "стандартного"
     if custom_critical_prompt and custom_critical_prompt.strip():
         prompt_info = "вашего личного"
@@ -696,6 +708,12 @@ async def analyze_tender_with_files(
                 except Exception as e:
                     logger.error(f"❌ [EXCEL] Ошибка чтения {file.filename}: {e}")
                     text = f"[Ошибка чтения Excel: {e}]"
+            elif ext == ".pdf":
+                try:
+                    text = read_pdf(str(file_path))
+                except Exception as e:
+                    logger.error(f"❌ [PDF] Ошибка чтения {file.filename}: {e}")
+                    text = f"[Ошибка чтения PDF: {e}]"
             else:
                 text = ""
 
@@ -712,7 +730,6 @@ async def analyze_tender_with_files(
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    # Анализ
     start_analysis = time.time()
     logger.info(f"🧠 [AI] Начало анализа текста для {regNumber}, длина: {len(combined_text)} символов")
     try:
@@ -731,7 +748,6 @@ async def analyze_tender_with_files(
 
     await database.save_analysis_cache(regNumber, analysis_result)
 
-    # Формируем DOCX-отчёт
     doc = Document()
     doc.add_heading('РЕЗУЛЬТАТЫ АНАЛИЗА ТЕНДЕРА', 0)
     doc.add_paragraph(f'Анализ проведён с использованием {prompt_info} промпта.')
