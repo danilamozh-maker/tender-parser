@@ -692,62 +692,67 @@ async def analyze_tender_with_files(
 
     try:
         start_files = time.time()
-        for idx, file in enumerate(files):
-            logger.info(f"📄 [FILE] Обработка файла {idx+1}/{len(files)}: {file.filename}")
-            content = await file.read()
+  FILE_READ_TIMEOUT = 30  # секунд
 
-            file_type = detect_file_type(content, file.filename)
-            ext_map = {
-                'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
-                'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
-                'jpg': '.jpg', 'rtf': '.rtf', 'doc': '.doc'
-            }
-            new_ext = ext_map.get(file_type, '')
-            base, old_ext = os.path.splitext(file.filename)
-            corrected_filename = base + new_ext if new_ext else file.filename
+for idx, file in enumerate(files):
+    logger.info(f"📄 [FILE] Обработка файла {idx+1}/{len(files)}: {file.filename}")
+    content = await file.read()
 
-            file_path = temp_dir / corrected_filename
-            with open(file_path, "wb") as f:
-                f.write(content)
+    file_type = detect_file_type(content, file.filename)
+    ext_map = {
+        'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
+        'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
+        'jpg': '.jpg', 'rtf': '.rtf', 'doc': '.doc'
+    }
+    new_ext = ext_map.get(file_type, '')
+    base, old_ext = os.path.splitext(file.filename)
+    corrected_filename = base + new_ext if new_ext else file.filename
 
-            ext = file_path.suffix.lower()
+    file_path = temp_dir / corrected_filename
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    ext = file_path.suffix.lower()
+    text = ""
+    try:
+        if ext == ".docx":
+            text = await asyncio.wait_for(
+                asyncio.to_thread(read_docx, str(file_path)),
+                timeout=FILE_READ_TIMEOUT
+            )
+            logger.info(f"📄 [DOCX] {file.filename} -> {len(text)} символов извлечено")
+        elif ext == ".txt":
+            text = await asyncio.wait_for(
+                asyncio.to_thread(read_txt, str(file_path)),
+                timeout=FILE_READ_TIMEOUT
+            )
+            if text:
+                logger.info(f"📄 [TXT] {file.filename} -> {len(text)} символов извлечено")
+        elif ext in (".xlsx", ".xls"):
+            text = await asyncio.wait_for(
+                asyncio.to_thread(read_excel, str(file_path)),
+                timeout=FILE_READ_TIMEOUT
+            )
+            logger.info(f"📄 [EXCEL] {file.filename} -> {len(text)} символов извлечено")
+        elif ext == ".pdf":
+            text = await asyncio.wait_for(
+                asyncio.to_thread(read_pdf, str(file_path)),
+                timeout=FILE_READ_TIMEOUT
+            )
+            logger.info(f"📄 [PDF] {file.filename} -> {len(text)} символов извлечено")
+        else:
             text = ""
-            if ext == ".docx":
-                try:
-                    text = read_docx(str(file_path))
-                except Exception as e:
-                    logger.error(f"❌ [DOCX] Ошибка чтения {file.filename}: {e}")
-                    text = f"[Ошибка чтения DOCX: {e}]"
-                else:
-                    logger.info(f"📄 [DOCX] {file.filename} -> {len(text)} символов извлечено")
-            elif ext == ".txt":
-                text = read_txt(str(file_path))
-                if text:
-                    logger.info(f"📄 [TXT] {file.filename} -> {len(text)} символов извлечено")
-            elif ext in (".xlsx", ".xls"):
-                try:
-                    text = read_excel(str(file_path))
-                except Exception as e:
-                    logger.error(f"❌ [EXCEL] Ошибка чтения {file.filename}: {e}")
-                    text = f"[Ошибка чтения Excel: {e}]"
-                else:
-                    logger.info(f"📄 [EXCEL] {file.filename} -> {len(text)} символов извлечено")
-            elif ext == ".pdf":
-                try:
-                    text = read_pdf(str(file_path))
-                except Exception as e:
-                    logger.error(f"❌ [PDF] Ошибка чтения {file.filename}: {e}")
-                    text = f"[Ошибка чтения PDF: {e}]"
-                else:
-                    logger.info(f"📄 [PDF] {file.filename} -> {len(text)} символов извлечено")
-            else:
-                text = ""
+    except asyncio.TimeoutError:
+        logger.error(f"⏱️ [TIMEOUT] Чтение файла {file.filename} превысило {FILE_READ_TIMEOUT} сек, пропускаем")
+        text = f"[Пропущено: таймаут чтения {FILE_READ_TIMEOUT} сек]"
+    except Exception as e:
+        logger.error(f"❌ [ERROR] Ошибка чтения {file.filename}: {e}")
+        text = f"[Ошибка чтения: {e}]"
 
-            if text and not text.startswith("Ошибка") and not text.startswith("[Ошибка"):
-                combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
+    if text and not text.startswith("Ошибка") and not text.startswith("[Пропущено") and not text.startswith("[Ошибка"):
+        combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
 
-            original_files.append((corrected_filename, content))
-
+    original_files.append((corrected_filename, content))
         logger.info(f"⏱ [FILES] Обработка файлов завершена за {time.time() - start_files:.2f} сек")
 
     except Exception as e:
