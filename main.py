@@ -14,13 +14,13 @@ from docx import Document
 import requests
 import httpx
 import pdfplumber
+import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from urllib.parse import quote
 import openpyxl
 import xlrd
-import pandas as pd
 import uvicorn
 import database
 import parser
@@ -428,77 +428,6 @@ async def updates_xml():
     if not os.path.exists(file_path):
         raise HTTPException(404, "Файл updates.xml не найден")
     return FileResponse(file_path, media_type="application/xml")
-# ================= ЭНДПОЙНТ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
-@app.post("/analyze_tender_list")
-@limiter.limit("5/minute")
-async def analyze_tender_list(
-    request: Request,
-    file: UploadFile = File(...),
-    custom_prompt: str = Form("")
-):
-    await check_access(request)
-    try:
-        df = pd.read_excel(file.file)
-    except Exception as e:
-        raise HTTPException(400, f"Ошибка чтения Excel: {e}")
-
-    if df.empty:
-        raise HTTPException(400, "Файл пуст")
-
-    first_col = df.columns[0]
-    titles = df[first_col].astype(str).tolist()
-
-    license_key = request.headers.get("X-License-Key")
-    device_id = request.headers.get("X-Device-ID")
-
-    def analyze_title(title, custom_prompt):
-        if custom_prompt and custom_prompt.strip():
-            prompt = f"""Ты — эксперт по тендерам. У тебя есть промпт пользователя, который описывает его специализацию и критерии отбора тендеров.
-Промпт пользователя:
-{custom_prompt}
-
-Оцени, подходит ли данный тендер под критерии пользователя. Ответь в формате:
-Возможен: Да/Нет
-Комментарий: (краткое пояснение, почему да или нет)
-
-Название тендера: {title}
-"""
-        else:
-            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь в формате:
-Возможен: Да/Нет
-Комментарий: (краткое пояснение)
-
-Название тендера: {title}
-"""
-        answer = query_deepseek(prompt, license_key, device_id)
-        possible = "Нет"
-        comment = ""
-        for line in answer.split('\n'):
-            if line.startswith("Возможен:"):
-                possible = "Да" if "Да" in line else "Нет"
-            elif line.startswith("Комментарий:"):
-                comment = line.replace("Комментарий:", "").strip()
-        return possible, comment
-
-    max_items = 50  # ограничим, чтобы не перегрузить
-    results = []
-    for idx, title in enumerate(titles[:max_items]):
-        possible, comment = analyze_title(title, custom_prompt)
-        results.append({"Название": title, "Возможен": possible, "Комментарий": comment})
-
-    output_df = pd.DataFrame(results)
-    output_buffer = io.BytesIO()
-    with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-        output_df.to_excel(writer, index=False)
-    output_buffer.seek(0)
-
-    filename = f"анализ_списка_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    encoded = quote(filename)
-    return Response(
-        output_buffer.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
-    )
 
 # ================= ЭНДПОЙНТЫ ЮKASSA =================
 @app.post("/api/create-payment")
@@ -731,6 +660,7 @@ async def analyze_tender_with_files(
     custom_critical_prompt: str = Form("")
 ):
     FILE_READ_TIMEOUT = 30
+
     start_total = time.time()
     logger.info(f"🚀 [START] Тендер {regNumber}, файлов: {len(files)}")
 
@@ -888,7 +818,7 @@ async def analyze_tender_with_files(
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     )
 
-# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
+# ================= ЭНДПОЙНТ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
 @app.post("/analyze_tender_list")
 @limiter.limit("5/minute")
 async def analyze_tender_list(
@@ -897,8 +827,6 @@ async def analyze_tender_list(
     custom_prompt: str = Form("")
 ):
     await check_access(request)
-    
-    # Читаем Excel
     try:
         df = pd.read_excel(file.file)
     except Exception as e:
@@ -907,30 +835,28 @@ async def analyze_tender_list(
     if df.empty:
         raise HTTPException(400, "Файл пуст")
 
-    # Берём первую колонку как названия тендеров
     first_col = df.columns[0]
     titles = df[first_col].astype(str).tolist()
 
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
-    # Функция для анализа одного названия
     def analyze_title(title, custom_prompt):
         if custom_prompt and custom_prompt.strip():
             prompt = f"""Ты — эксперт по тендерам. У тебя есть промпт пользователя, который описывает его специализацию и критерии отбора тендеров.
 Промпт пользователя:
 {custom_prompt}
 
-Оцени, подходит ли данный тендер под критерии пользователя. Ответь строго в формате:
+Оцени, подходит ли данный тендер под критерии пользователя. Ответь в формате:
 Возможен: Да/Нет
-Комментарий: (краткое пояснение, почему да или нет, 1-2 предложения)
+Комментарий: (краткое пояснение, почему да или нет)
 
 Название тендера: {title}
 """
         else:
-            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь строго в формате:
+            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь в формате:
 Возможен: Да/Нет
-Комментарий: (краткое пояснение, 1-2 предложения)
+Комментарий: (краткое пояснение)
 
 Название тендера: {title}
 """
@@ -944,15 +870,9 @@ async def analyze_tender_list(
                 comment = line.replace("Комментарий:", "").strip()
         return possible, comment
 
-    # Ограничение до 200 строк
-    max_items = 200
-    if len(titles) > max_items:
-        logger.warning(f"Список содержит {len(titles)} строк, обработано только {max_items}")
-    
+    max_items = 50
     results = []
     for idx, title in enumerate(titles[:max_items]):
-        if not title or title.strip() == "":
-            continue
         possible, comment = analyze_title(title, custom_prompt)
         results.append({"Название": title, "Возможен": possible, "Комментарий": comment})
 
