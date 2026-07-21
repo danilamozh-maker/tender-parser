@@ -16,3 +16,5 @@ python-dotenv
 slowapi
 pydantic
 yookassa>=2.0.0
+pandas
+
