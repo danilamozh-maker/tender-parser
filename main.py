@@ -84,11 +84,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ================= CORS =================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["chrome-extension://*", "https://csb24-tender.ru"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
 # ================= MIDDLEWARE ЛОГИРОВАНИЯ =================
@@ -569,7 +568,6 @@ async def create_order(request: Request):
     expires_at = result.get("expires_at") if result and result.get("valid") else None
     return {"status": "success", "license_key": license_key, "expires_at": expires_at}
 
-# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ СОЗДАНИЯ ЛИЦЕНЗИЙ (АДМИН) =================
 @app.post("/api/admin/create-license")
 @limiter.limit("5/minute")
 async def admin_create_license(request: Request, data: dict = None):
@@ -649,7 +647,7 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ =================
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ (С ТАЙМАУТОМ НА ФАЙЛЫ) =================
 @app.post("/analyze_tender_with_files")
 @limiter.limit("10/minute")
 async def analyze_tender_with_files(
@@ -660,6 +658,8 @@ async def analyze_tender_with_files(
     files: list[UploadFile] = File(...),
     custom_critical_prompt: str = Form("")
 ):
+    FILE_READ_TIMEOUT = 13  # секунд на чтение одного файла
+
     start_total = time.time()
     logger.info(f"🚀 [START] Тендер {regNumber}, файлов: {len(files)}")
 
@@ -692,67 +692,65 @@ async def analyze_tender_with_files(
 
     try:
         start_files = time.time()
-  FILE_READ_TIMEOUT = 15  # секунд
+        for idx, file in enumerate(files):
+            logger.info(f"📄 [FILE] Обработка файла {idx+1}/{len(files)}: {file.filename}")
+            content = await file.read()
 
-for idx, file in enumerate(files):
-    logger.info(f"📄 [FILE] Обработка файла {idx+1}/{len(files)}: {file.filename}")
-    content = await file.read()
+            file_type = detect_file_type(content, file.filename)
+            ext_map = {
+                'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
+                'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
+                'jpg': '.jpg', 'rtf': '.rtf', 'doc': '.doc'
+            }
+            new_ext = ext_map.get(file_type, '')
+            base, old_ext = os.path.splitext(file.filename)
+            corrected_filename = base + new_ext if new_ext else file.filename
 
-    file_type = detect_file_type(content, file.filename)
-    ext_map = {
-        'pdf': '.pdf', 'xlsx': '.xlsx', 'xls': '.xls', 'docx': '.docx',
-        'rar': '.rar', 'zip': '.zip', '7z': '.7z', 'png': '.png',
-        'jpg': '.jpg', 'rtf': '.rtf', 'doc': '.doc'
-    }
-    new_ext = ext_map.get(file_type, '')
-    base, old_ext = os.path.splitext(file.filename)
-    corrected_filename = base + new_ext if new_ext else file.filename
+            file_path = temp_dir / corrected_filename
+            with open(file_path, "wb") as f:
+                f.write(content)
 
-    file_path = temp_dir / corrected_filename
-    with open(file_path, "wb") as f:
-        f.write(content)
-
-    ext = file_path.suffix.lower()
-    text = ""
-    try:
-        if ext == ".docx":
-            text = await asyncio.wait_for(
-                asyncio.to_thread(read_docx, str(file_path)),
-                timeout=FILE_READ_TIMEOUT
-            )
-            logger.info(f"📄 [DOCX] {file.filename} -> {len(text)} символов извлечено")
-        elif ext == ".txt":
-            text = await asyncio.wait_for(
-                asyncio.to_thread(read_txt, str(file_path)),
-                timeout=FILE_READ_TIMEOUT
-            )
-            if text:
-                logger.info(f"📄 [TXT] {file.filename} -> {len(text)} символов извлечено")
-        elif ext in (".xlsx", ".xls"):
-            text = await asyncio.wait_for(
-                asyncio.to_thread(read_excel, str(file_path)),
-                timeout=FILE_READ_TIMEOUT
-            )
-            logger.info(f"📄 [EXCEL] {file.filename} -> {len(text)} символов извлечено")
-        elif ext == ".pdf":
-            text = await asyncio.wait_for(
-                asyncio.to_thread(read_pdf, str(file_path)),
-                timeout=FILE_READ_TIMEOUT
-            )
-            logger.info(f"📄 [PDF] {file.filename} -> {len(text)} символов извлечено")
-        else:
+            ext = file_path.suffix.lower()
             text = ""
-    except asyncio.TimeoutError:
-        logger.error(f"⏱️ [TIMEOUT] Чтение файла {file.filename} превысило {FILE_READ_TIMEOUT} сек, пропускаем")
-        text = f"[Пропущено: таймаут чтения {FILE_READ_TIMEOUT} сек]"
-    except Exception as e:
-        logger.error(f"❌ [ERROR] Ошибка чтения {file.filename}: {e}")
-        text = f"[Ошибка чтения: {e}]"
+            try:
+                if ext == ".docx":
+                    text = await asyncio.wait_for(
+                        asyncio.to_thread(read_docx, str(file_path)),
+                        timeout=FILE_READ_TIMEOUT
+                    )
+                    logger.info(f"📄 [DOCX] {file.filename} -> {len(text)} символов извлечено")
+                elif ext == ".txt":
+                    text = await asyncio.wait_for(
+                        asyncio.to_thread(read_txt, str(file_path)),
+                        timeout=FILE_READ_TIMEOUT                    )
+                    if text:
+                        logger.info(f"📄 [TXT] {file.filename} -> {len(text)} символов извлечено")
+                elif ext in (".xlsx", ".xls"):
+                    text = await asyncio.wait_for(
+                        asyncio.to_thread(read_excel, str(file_path)),
+                        timeout=FILE_READ_TIMEOUT
+                    )
+                    logger.info(f"📄 [EXCEL] {file.filename} -> {len(text)} символов извлечено")
+                elif ext == ".pdf":
+                    text = await asyncio.wait_for(
+                        asyncio.to_thread(read_pdf, str(file_path)),
+                        timeout=FILE_READ_TIMEOUT
+                    )
+                    logger.info(f"📄 [PDF] {file.filename} -> {len(text)} символов извлечено")
+                else:
+                    text = ""
+            except asyncio.TimeoutError:
+                logger.error(f"⏱️ [TIMEOUT] Чтение файла {file.filename} превысило {FILE_READ_TIMEOUT} сек, пропускаем")
+                text = f"[Пропущено: таймаут чтения {FILE_READ_TIMEOUT} сек]"
+            except Exception as e:
+                logger.error(f"❌ [ERROR] Ошибка чтения {file.filename}: {e}")
+                text = f"[Ошибка чтения: {e}]"
 
-    if text and not text.startswith("Ошибка") and not text.startswith("[Пропущено") and not text.startswith("[Ошибка"):
-        combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
+            if text and not text.startswith("Ошибка") and not text.startswith("[Пропущено") and not text.startswith("[Ошибка"):
+                combined_text += f"\n\n--- Содержимое файла {corrected_filename} ---\n{text}"
 
-    original_files.append((corrected_filename, content))
+            original_files.append((corrected_filename, content))
+
         logger.info(f"⏱ [FILES] Обработка файлов завершена за {time.time() - start_files:.2f} сек")
 
     except Exception as e:
