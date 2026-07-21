@@ -692,7 +692,7 @@ async def analyze_tender_with_files(
 
     try:
         start_files = time.time()
-  FILE_READ_TIMEOUT = 30  # секунд
+  FILE_READ_TIMEOUT = 15  # секунд
 
 for idx, file in enumerate(files):
     logger.info(f"📄 [FILE] Обработка файла {idx+1}/{len(files)}: {file.filename}")
