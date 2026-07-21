@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from urllib.parse import quote
 import openpyxl
 import xlrd
+import pandas as pd
 import uvicorn
 import database
 import parser
@@ -84,8 +85,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ================= CORS =================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["chrome-extension://*", "https://csb24-tender.ru"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -647,7 +648,7 @@ async def analyze_texts(request: Request, data: AnalyzeRequest):
     encoded = quote(filename)
     return Response(zip_buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"})
 
-# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ (С ТАЙМАУТОМ НА ФАЙЛЫ) =================
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА ТЕКУЩЕГО ТЕНДЕРА С ДОКУМЕНТАМИ =================
 @app.post("/analyze_tender_with_files")
 @limiter.limit("10/minute")
 async def analyze_tender_with_files(
@@ -658,8 +659,7 @@ async def analyze_tender_with_files(
     files: list[UploadFile] = File(...),
     custom_critical_prompt: str = Form("")
 ):
-    FILE_READ_TIMEOUT = 13  # секунд на чтение одного файла
-
+    FILE_READ_TIMEOUT = 30
     start_total = time.time()
     logger.info(f"🚀 [START] Тендер {regNumber}, файлов: {len(files)}")
 
@@ -722,7 +722,8 @@ async def analyze_tender_with_files(
                 elif ext == ".txt":
                     text = await asyncio.wait_for(
                         asyncio.to_thread(read_txt, str(file_path)),
-                        timeout=FILE_READ_TIMEOUT                    )
+                        timeout=FILE_READ_TIMEOUT
+                    )
                     if text:
                         logger.info(f"📄 [TXT] {file.filename} -> {len(text)} символов извлечено")
                 elif ext in (".xlsx", ".xls"):
@@ -762,7 +763,7 @@ async def analyze_tender_with_files(
     start_analysis = time.time()
     logger.info(f"🧠 [AI] Начало анализа текста для {regNumber}, длина: {len(combined_text)} символов")
     try:
-        analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=1000000)
+        analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=100000)
     except Exception as e:
         logger.error(f"❌ [AI] Ошибка при структурированном анализе: {e}")
         raise
@@ -813,6 +814,88 @@ async def analyze_tender_with_files(
     return Response(
         zip_buffer.getvalue(),
         media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+    )
+
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
+@app.post("/analyze_tender_list")
+@limiter.limit("5/minute")
+async def analyze_tender_list(
+    request: Request,
+    file: UploadFile = File(...),
+    custom_prompt: str = Form("")
+):
+    await check_access(request)
+    
+    # Читаем Excel
+    try:
+        df = pd.read_excel(file.file)
+    except Exception as e:
+        raise HTTPException(400, f"Ошибка чтения Excel: {e}")
+
+    if df.empty:
+        raise HTTPException(400, "Файл пуст")
+
+    # Берём первую колонку как названия тендеров
+    first_col = df.columns[0]
+    titles = df[first_col].astype(str).tolist()
+
+    license_key = request.headers.get("X-License-Key")
+    device_id = request.headers.get("X-Device-ID")
+
+    # Функция для анализа одного названия
+    def analyze_title(title, custom_prompt):
+        if custom_prompt and custom_prompt.strip():
+            prompt = f"""Ты — эксперт по тендерам. У тебя есть промпт пользователя, который описывает его специализацию и критерии отбора тендеров.
+Промпт пользователя:
+{custom_prompt}
+
+Оцени, подходит ли данный тендер под критерии пользователя. Ответь строго в формате:
+Возможен: Да/Нет
+Комментарий: (краткое пояснение, почему да или нет, 1-2 предложения)
+
+Название тендера: {title}
+"""
+        else:
+            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь строго в формате:
+Возможен: Да/Нет
+Комментарий: (краткое пояснение, 1-2 предложения)
+
+Название тендера: {title}
+"""
+        answer = query_deepseek(prompt, license_key, device_id)
+        possible = "Нет"
+        comment = ""
+        for line in answer.split('\n'):
+            if line.startswith("Возможен:"):
+                possible = "Да" if "Да" in line else "Нет"
+            elif line.startswith("Комментарий:"):
+                comment = line.replace("Комментарий:", "").strip()
+        return possible, comment
+
+    # Ограничение до 200 строк
+    max_items = 200
+    if len(titles) > max_items:
+        logger.warning(f"Список содержит {len(titles)} строк, обработано только {max_items}")
+    
+    results = []
+    for idx, title in enumerate(titles[:max_items]):
+        if not title or title.strip() == "":
+            continue
+        possible, comment = analyze_title(title, custom_prompt)
+        results.append({"Название": title, "Возможен": possible, "Комментарий": comment})
+
+    output_df = pd.DataFrame(results)
+    output_buffer = io.BytesIO()
+    with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+        output_df.to_excel(writer, index=False)
+    output_buffer.seek(0)
+
+    filename = f"анализ_списка_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    encoded = quote(filename)
+    return Response(
+        output_buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     )
 
