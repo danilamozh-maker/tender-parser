@@ -85,8 +85,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ================= CORS =================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["chrome-extension://*", "https://csb24-tender.ru"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -569,6 +569,7 @@ async def create_order(request: Request):
     expires_at = result.get("expires_at") if result and result.get("valid") else None
     return {"status": "success", "license_key": license_key, "expires_at": expires_at}
 
+# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ СОЗДАНИЯ ЛИЦЕНЗИЙ (АДМИН) =================
 @app.post("/api/admin/create-license")
 @limiter.limit("5/minute")
 async def admin_create_license(request: Request, data: dict = None):
@@ -659,7 +660,7 @@ async def analyze_tender_with_files(
     files: list[UploadFile] = File(...),
     custom_critical_prompt: str = Form("")
 ):
-    FILE_READ_TIMEOUT = 30
+    FILE_READ_TIMEOUT = 30  # секунд на чтение одного файла
 
     start_total = time.time()
     logger.info(f"🚀 [START] Тендер {regNumber}, файлов: {len(files)}")
@@ -815,78 +816,6 @@ async def analyze_tender_with_files(
     return Response(
         zip_buffer.getvalue(),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
-    )
-
-# ================= ЭНДПОЙНТ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
-@app.post("/analyze_tender_list")
-@limiter.limit("5/minute")
-async def analyze_tender_list(
-    request: Request,
-    file: UploadFile = File(...),
-    custom_prompt: str = Form("")
-):
-    await check_access(request)
-    try:
-        df = pd.read_excel(file.file)
-    except Exception as e:
-        raise HTTPException(400, f"Ошибка чтения Excel: {e}")
-
-    if df.empty:
-        raise HTTPException(400, "Файл пуст")
-
-    first_col = df.columns[0]
-    titles = df[first_col].astype(str).tolist()
-
-    license_key = request.headers.get("X-License-Key")
-    device_id = request.headers.get("X-Device-ID")
-
-    def analyze_title(title, custom_prompt):
-        if custom_prompt and custom_prompt.strip():
-            prompt = f"""Ты — эксперт по тендерам. У тебя есть промпт пользователя, который описывает его специализацию и критерии отбора тендеров.
-Промпт пользователя:
-{custom_prompt}
-
-Оцени, подходит ли данный тендер под критерии пользователя. Ответь в формате:
-Возможен: Да/Нет
-Комментарий: (краткое пояснение, почему да или нет)
-
-Название тендера: {title}
-"""
-        else:
-            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь в формате:
-Возможен: Да/Нет
-Комментарий: (краткое пояснение)
-
-Название тендера: {title}
-"""
-        answer = query_deepseek(prompt, license_key, device_id)
-        possible = "Нет"
-        comment = ""
-        for line in answer.split('\n'):
-            if line.startswith("Возможен:"):
-                possible = "Да" if "Да" in line else "Нет"
-            elif line.startswith("Комментарий:"):
-                comment = line.replace("Комментарий:", "").strip()
-        return possible, comment
-
-    max_items = 50
-    results = []
-    for idx, title in enumerate(titles[:max_items]):
-        possible, comment = analyze_title(title, custom_prompt)
-        results.append({"Название": title, "Возможен": possible, "Комментарий": comment})
-
-    output_df = pd.DataFrame(results)
-    output_buffer = io.BytesIO()
-    with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-        output_df.to_excel(writer, index=False)
-    output_buffer.seek(0)
-
-    filename = f"анализ_списка_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    encoded = quote(filename)
-    return Response(
-        output_buffer.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     )
 
@@ -1338,6 +1267,78 @@ async def activate_license(request: Request, data: LicenseActivateRequest):
         return {"valid": False, "reason": result["reason"]}
     logger.info(f"Лицензия активирована: {data.key[:8]}...")
     return {"valid": True, "expires_at": result["expires_at"]}
+
+# ================= НОВЫЙ ЭНДПОЙНТ: АНАЛИЗ СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
+@app.post("/analyze_tender_list")
+@limiter.limit("5/minute")
+async def analyze_tender_list(
+    request: Request,
+    file: UploadFile = File(...),
+    custom_prompt: str = Form("")
+):
+    await check_access(request)
+    try:
+        df = pd.read_excel(file.file)
+    except Exception as e:
+        raise HTTPException(400, f"Ошибка чтения Excel: {e}")
+
+    if df.empty:
+        raise HTTPException(400, "Файл пуст")
+
+    first_col = df.columns[0]
+    titles = df[first_col].astype(str).tolist()
+
+    license_key = request.headers.get("X-License-Key")
+    device_id = request.headers.get("X-Device-ID")
+
+    def analyze_title(title, custom_prompt):
+        if custom_prompt and custom_prompt.strip():
+            prompt = f"""Ты — эксперт по тендерам. У тебя есть промпт пользователя, который описывает его специализацию и критерии отбора тендеров.
+Промпт пользователя:
+{custom_prompt}
+
+Оцени, подходит ли данный тендер под критерии пользователя. Ответь в формате:
+Возможен: Да/Нет
+Комментарий: (краткое пояснение, почему да или нет)
+
+Название тендера: {title}
+"""
+        else:
+            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь в формате:
+Возможен: Да/Нет
+Комментарий: (краткое пояснение)
+
+Название тендера: {title}
+"""
+        answer = query_deepseek(prompt, license_key, device_id)
+        possible = "Нет"
+        comment = ""
+        for line in answer.split('\n'):
+            if line.startswith("Возможен:"):
+                possible = "Да" if "Да" in line else "Нет"
+            elif line.startswith("Комментарий:"):
+                comment = line.replace("Комментарий:", "").strip()
+        return possible, comment
+
+    max_items = 50
+    results = []
+    for idx, title in enumerate(titles[:max_items]):
+        possible, comment = analyze_title(title, custom_prompt)
+        results.append({"Название": title, "Возможен": possible, "Комментарий": comment})
+
+    output_df = pd.DataFrame(results)
+    output_buffer = io.BytesIO()
+    with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+        output_df.to_excel(writer, index=False)
+    output_buffer.seek(0)
+
+    filename = f"анализ_списка_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    encoded = quote(filename)
+    return Response(
+        output_buffer.getvalue(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+    )
 
 # ================= ЗАПУСК =================
 if __name__ == "__main__":
