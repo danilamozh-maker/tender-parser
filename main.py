@@ -1284,11 +1284,26 @@ async def analyze_tender_list(
     if df.empty:
         raise HTTPException(400, "Файл пуст")
 
+    # Первая колонка – названия тендеров
     first_col = df.columns[0]
     titles = df[first_col].astype(str).tolist()
 
-    link_col = df.columns[1] if len(df.columns) > 1 else None
-    links = df[link_col].astype(str).tolist() if link_col else [""] * len(df)
+    # Ищем колонку со ссылками
+    link_col = None
+    for col in df.columns:
+        # Проверяем первые 10 строк, есть ли там http:// или https://
+        sample = df[col].astype(str).head(10)
+        if sample.str.contains(r'https?://', regex=True).any():
+            link_col = col
+            break
+
+    if link_col is None:
+        # Если ссылок не найдено, оставляем пустую колонку
+        links = [""] * len(df)
+        logger.warning("⚠️ Колонка со ссылками не найдена, ссылки будут пустыми")
+    else:
+        links = df[link_col].astype(str).tolist()
+        logger.info(f"🔗 Колонка со ссылками: {link_col}")
 
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
