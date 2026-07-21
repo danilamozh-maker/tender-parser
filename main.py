@@ -762,7 +762,7 @@ async def analyze_tender_with_files(
     start_analysis = time.time()
     logger.info(f"🧠 [AI] Начало анализа текста для {regNumber}, длина: {len(combined_text)} символов")
     try:
-        analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=100000)
+        analysis_result = analyze_tender_text(combined_text, selected_fields, license_key, device_id, max_text_len=1000000)
     except Exception as e:
         logger.error(f"❌ [AI] Ошибка при структурированном анализе: {e}")
         raise
