@@ -3,6 +3,6 @@
   <app appid='jpfialebhbalpabmclloefkmffdbabmb'>
     <updatecheck 
       codebase='https://csb24-tender.ru/download-file/tender-parser-extension.crx'
-      version='2.2' />
+      version='2.3' />
   </app>
 </gupdate>
