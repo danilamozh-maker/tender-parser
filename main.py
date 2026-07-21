@@ -569,7 +569,6 @@ async def create_order(request: Request):
     expires_at = result.get("expires_at") if result and result.get("valid") else None
     return {"status": "success", "license_key": license_key, "expires_at": expires_at}
 
-# ================= НОВЫЙ ЭНДПОЙНТ ДЛЯ СОЗДАНИЯ ЛИЦЕНЗИЙ (АДМИН) =================
 @app.post("/api/admin/create-license")
 @limiter.limit("5/minute")
 async def admin_create_license(request: Request, data: dict = None):
@@ -1268,7 +1267,7 @@ async def activate_license(request: Request, data: LicenseActivateRequest):
     logger.info(f"Лицензия активирована: {data.key[:8]}...")
     return {"valid": True, "expires_at": result["expires_at"]}
 
-# ================= НОВЫЙ ЭНДПОЙНТ: АНАЛИЗ СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
+# ================= ЭНДПОЙНТ ДЛЯ АНАЛИЗА СПИСКА ТЕНДЕРОВ (EXCEL) =================
 @app.post("/analyze_tender_list")
 @limiter.limit("5/minute")
 async def analyze_tender_list(
@@ -1287,6 +1286,9 @@ async def analyze_tender_list(
 
     first_col = df.columns[0]
     titles = df[first_col].astype(str).tolist()
+
+    link_col = df.columns[1] if len(df.columns) > 1 else None
+    links = df[link_col].astype(str).tolist() if link_col else [""] * len(df)
 
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
@@ -1322,9 +1324,16 @@ async def analyze_tender_list(
 
     max_items = 50
     results = []
-    for idx, title in enumerate(titles[:max_items]):
+    for idx in range(min(max_items, len(titles))):
+        title = titles[idx]
+        link = links[idx] if idx < len(links) else ""
         possible, comment = analyze_title(title, custom_prompt)
-        results.append({"Название": title, "Возможен": possible, "Комментарий": comment})
+        results.append({
+            "Название": title,
+            "Ссылка": link,
+            "Возможен": possible,
+            "Комментарий": comment
+        })
 
     output_df = pd.DataFrame(results)
     output_buffer = io.BytesIO()
