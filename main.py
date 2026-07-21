@@ -820,6 +820,7 @@ async def analyze_tender_with_files(
 # ================= ЭНДПОЙНТ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
 @app.post("/analyze_tender_list")
 @limiter.limit("5/minute")
+max_items = 10
 async def analyze_tender_list(
     request: Request,
     file: UploadFile = File(...),
