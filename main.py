@@ -6,6 +6,7 @@ import json
 import time
 import asyncio
 import hashlib
+import gc
 import logging
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -825,10 +826,16 @@ async def analyze_tender_list(
     file: UploadFile = File(...),
     custom_prompt: str = Form("")
 ):
-    await check_access(request)
+    try:
+        await check_access(request)
+    except Exception as e:
+        logger.error(f"❌ [ACCESS] Ошибка доступа: {e}")
+        raise
+
     try:
         df = pd.read_excel(file.file)
     except Exception as e:
+        logger.error(f"❌ [EXCEL] Ошибка чтения файла: {e}")
         raise HTTPException(400, f"Ошибка чтения Excel: {e}")
 
     if df.empty:
@@ -883,7 +890,7 @@ async def analyze_tender_list(
                 comment = line.replace("Комментарий:", "").strip()
         return possible, comment
 
-    max_items = 50
+    max_items = 200  # увеличено для больших файлов
     results = []
     for idx in range(min(max_items, len(titles))):
         title = titles[idx]
@@ -904,6 +911,11 @@ async def analyze_tender_list(
 
     filename = f"анализ_списка_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     encoded = quote(filename)
+
+    # Принудительная очистка памяти
+    gc.collect()
+    logger.info(f"✅ [DONE] Список обработан, файл отправлен клиенту")
+
     return Response(
         output_buffer.getvalue(),
         media_type="application/octet-stream",
