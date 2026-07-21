@@ -820,7 +820,6 @@ async def analyze_tender_with_files(
 # ================= ЭНДПОЙНТ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
 @app.post("/analyze_tender_list")
 @limiter.limit("5/minute")
-max_items = 10
 async def analyze_tender_list(
     request: Request,
     file: UploadFile = File(...),
@@ -835,11 +834,9 @@ async def analyze_tender_list(
     if df.empty:
         raise HTTPException(400, "Файл пуст")
 
-    # Первая колонка – названия тендеров
     first_col = df.columns[0]
     titles = df[first_col].astype(str).tolist()
 
-    # Ищем колонку со ссылками
     link_col = None
     for col in df.columns:
         sample = df[col].astype(str).head(10)
