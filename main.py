@@ -899,15 +899,24 @@ async def analyze_tender_list(
 
 Ответ (строго по одному на строку, в том же порядке):"""
 
-        messages = [
-            {"role": "system", "content": "Ты — эксперт по анализу тендеров. Отвечай строго в формате: Да/Нет/Возможно | Комментарий. По одной строке на тендер. Будь внимателен и консервативен."},
+       messages = [
+          {
+              "role": "system",
+              "content": (
+                  "Ты — эксперт по анализу тендеров. "
+                  "Отвечай строго в формате: Да/Нет/Возможно | Комментарий. "
+                  "По одной строке на каждый тендер. "
+                  "Количество строк в ответе должно точно совпадать с количеством тендеров в списке. "
+                  "Будь внимателен и консервативен."
+              )
+            },
             {"role": "user", "content": prompt}
-        ]
+       ]
         payload = {
             "model": MODEL_NAME,
             "messages": messages,
             "temperature": 0,
-            "max_tokens": 1500,
+            "max_tokens": 3000,
             "stream": False
         }
         headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
