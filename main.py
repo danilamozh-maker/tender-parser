@@ -260,29 +260,21 @@ def read_pdf(file_path):
         logger.error(f"❌ [PDF] Ошибка при открытии {file_path}: {e}")
         return f"Ошибка чтения PDF: {e}"
 
-# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА (ИСПРАВЛЕНО — ДОВЕРЯЕМ РАСШИРЕНИЮ ОТ КЛИЕНТА) =================
 def detect_file_type(content: bytes, filename: str = "") -> str:
     """
     Определяет тип файла.
-    Если клиент передал файл с известным расширением — ДОВЕРЯЕМ расширению.
-    Глубокая проверка только если расширения нет или оно неизвестно.
+    ПОЛНОСТЬЮ ДОВЕРЯЕТ расширению, которое передал клиент.
     """
     ext = os.path.splitext(filename)[1].lower() if filename else ""
-
-    # Все известные расширения, которые мы умеем обрабатывать
-    known_extensions = {
-        '.docx', '.xlsx', '.xls', '.pdf', '.zip', '.rar', '.7z',
-        '.png', '.jpg', '.jpeg', '.rtf', '.txt', '.doc'
-    }
-
-    # Если у файла уже есть известное расширение — возвращаем его без проверки содержимого
-    if ext in known_extensions:
+    
+    # Если расширение есть — ВСЁ, возвращаем его без проверок
+    if ext:
         return ext.lstrip('.')
-
-    # Только если расширения нет или оно неизвестно — делаем глубокую проверку
+    
+    # Только если расширения нет — проверяем сигнатуру
     if content.startswith(b'%PDF'):
         return 'pdf'
-
+    
     if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
@@ -294,12 +286,12 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
                 return 'zip'
         except:
             return 'zip'
-
+    
     if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
         if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
             return 'xls'
         return 'doc'
-
+    
     if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'):
         return 'rar'
     if content.startswith(b'7z\xbc\xaf\x27\x1c'):
@@ -310,7 +302,7 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
         return 'jpg'
     if content.startswith(b'{\\rtf'):
         return 'rtf'
-
+    
     return 'unknown'
 
 # ================= ЗАПРОСЫ К DEEPSEEK =================
