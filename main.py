@@ -816,6 +816,18 @@ async def analyze_tender_with_files(
     )
 
 # ================= ЭНДПОЙНТ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
+@app.options("/analyze_tender_list")
+async def analyze_tender_list_options():
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Max-Age": "86400",
+        }
+    )
+
 @app.post("/analyze_tender_list")
 @limiter.limit("5/minute")
 async def analyze_tender_list(
@@ -913,13 +925,16 @@ async def analyze_tender_list(
     logger.info(f"✅ [DONE] Список обработан, файл отправлен клиенту")
 
     return Response(
-        output_buffer.getvalue(),
+        content=output_buffer.getvalue(),
+        status_code=200,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
             "Access-Control-Allow-Headers": "*",
-            "Access-Control-Allow-Credentials": "false"
+            "Access-Control-Allow-Credentials": "false",
+            "Access-Control-Max-Age": "86400",
         }
     )
 # ================= УПАКОВКА ФАЙЛОВ =================
