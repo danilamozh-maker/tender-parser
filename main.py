@@ -826,6 +826,16 @@ async def analyze_tender_list(
     file: UploadFile = File(...),
     custom_prompt: str = Form("")
 ):
+    # ===== ВРЕМЕННЫЕ CORS-ЗАГОЛОВКИ (КОСТЫЛЬ) =====
+    # Добавляем их вручную, чтобы балансировщик не затирал
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, GET, OPTIONS, DELETE, PUT",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Credentials": "false"
+    }
+    # =================================================
+
     try:
         await check_access(request)
     except Exception as e:
@@ -890,7 +900,7 @@ async def analyze_tender_list(
                 comment = line.replace("Комментарий:", "").strip()
         return possible, comment
 
-    max_items = 200  # увеличено для больших файлов
+    max_items = 200
     results = []
     for idx in range(min(max_items, len(titles))):
         title = titles[idx]
@@ -916,10 +926,14 @@ async def analyze_tender_list(
     gc.collect()
     logger.info(f"✅ [DONE] Список обработан, файл отправлен клиенту")
 
+    # ===== ВОЗВРАЩАЕМ ОТВЕТ С CORS-ЗАГОЛОВКАМИ =====
     return Response(
         output_buffer.getvalue(),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
+            **cors_headers
+        }
     )
 
 # ================= УПАКОВКА ФАЙЛОВ =================
