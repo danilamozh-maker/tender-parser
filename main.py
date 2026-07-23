@@ -260,21 +260,32 @@ def read_pdf(file_path):
         logger.warning(f"⚠️ [PDF] Не удалось прочитать {os.path.basename(file_path)}: {e}")
         return ""
 
+# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА =================
 def detect_file_type(content: bytes, filename: str = "") -> str:
-    """
-    Определяет тип файла.
-    ПОЛНОСТЬЮ ДОВЕРЯЕТ расширению, которое передал клиент.
-    """
     ext = os.path.splitext(filename)[1].lower() if filename else ""
-    
-    # Если расширение есть — ВСЁ, возвращаем его без проверок
-    if ext:
-        return ext.lstrip('.')
-    
-    # Только если расширения нет — проверяем сигнатуру
+
+    trusted_ext_map = {
+        '.docx': 'docx',
+        '.xlsx': 'xlsx',
+        '.xls': 'xls',
+        '.pdf': 'pdf',
+        '.zip': 'zip',
+        '.rar': 'rar',
+        '.7z': '7z',
+        '.png': 'png',
+        '.jpg': 'jpg',
+        '.jpeg': 'jpg',
+        '.rtf': 'rtf',
+        '.txt': 'txt',
+        '.doc': 'doc',
+    }
+
+    if ext in trusted_ext_map:
+        return trusted_ext_map[ext]
+
     if content.startswith(b'%PDF'):
         return 'pdf'
-    
+
     if content.startswith(b'PK\x03\x04') or content.startswith(b'PK\x05\x06') or content.startswith(b'PK\x07\x08'):
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
@@ -286,12 +297,12 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
                 return 'zip'
         except:
             return 'zip'
-    
+
     if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
         if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
             return 'xls'
         return 'doc'
-    
+
     if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'):
         return 'rar'
     if content.startswith(b'7z\xbc\xaf\x27\x1c'):
@@ -302,7 +313,7 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
         return 'jpg'
     if content.startswith(b'{\\rtf'):
         return 'rtf'
-    
+
     return 'unknown'
 
 # ================= ЗАПРОСЫ К DEEPSEEK =================
@@ -716,26 +727,21 @@ async def analyze_tender_with_files(
                         asyncio.to_thread(read_docx, str(file_path)),
                         timeout=FILE_READ_TIMEOUT
                     )
-                    logger.info(f"📄 [DOCX] {file.filename} -> {len(text)} символов извлечено")
                 elif ext == ".txt":
                     text = await asyncio.wait_for(
                         asyncio.to_thread(read_txt, str(file_path)),
                         timeout=FILE_READ_TIMEOUT
                     )
-                    if text:
-                        logger.info(f"📄 [TXT] {file.filename} -> {len(text)} символов извлечено")
                 elif ext in (".xlsx", ".xls"):
                     text = await asyncio.wait_for(
                         asyncio.to_thread(read_excel, str(file_path)),
                         timeout=FILE_READ_TIMEOUT
                     )
-                    logger.info(f"📄 [EXCEL] {file.filename} -> {len(text)} символов извлечено")
                 elif ext == ".pdf":
                     text = await asyncio.wait_for(
                         asyncio.to_thread(read_pdf, str(file_path)),
                         timeout=FILE_READ_TIMEOUT
                     )
-                    logger.info(f"📄 [PDF] {file.filename} -> {len(text)} символов извлечено")
                 else:
                     text = ""
             except asyncio.TimeoutError:
@@ -814,6 +820,7 @@ async def analyze_tender_with_files(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     )
+
 # ================= ЭНДПОЙНТ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
 @app.options("/analyze_tender_list")
 async def analyze_tender_list_options():
@@ -899,19 +906,19 @@ async def analyze_tender_list(
 
 Ответ (строго по одному на строку, в том же порядке):"""
 
-       messages = [
-          {
-              "role": "system",
-              "content": (
-                  "Ты — эксперт по анализу тендеров. "
-                  "Отвечай строго в формате: Да/Нет/Возможно | Комментарий. "
-                  "По одной строке на каждый тендер. "
-                  "Количество строк в ответе должно точно совпадать с количеством тендеров в списке. "
-                  "Будь внимателен и консервативен."
-              )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Ты — эксперт по анализу тендеров. "
+                    "Отвечай строго в формате: Да/Нет/Возможно | Комментарий. "
+                    "По одной строке на каждый тендер. "
+                    "Количество строк в ответе должно точно совпадать с количеством тендеров в списке. "
+                    "Будь внимателен и консервативен."
+                )
             },
             {"role": "user", "content": prompt}
-       ]
+        ]
         payload = {
             "model": MODEL_NAME,
             "messages": messages,
@@ -973,7 +980,6 @@ async def analyze_tender_list(
         comment_list.extend([""] * remaining)
 
     # Вставляем новые столбцы после первого столбца
-    first_col_name = df.columns[0]
     col_index = 1  # позиция после первого столбца
     df.insert(col_index, "Возможно", possible_list)
     df.insert(col_index + 1, "Комментарий", comment_list)
@@ -1006,6 +1012,7 @@ async def analyze_tender_list(
             "Access-Control-Max-Age": "86400",
         }
     )
+
 # ================= УПАКОВКА ФАЙЛОВ =================
 @app.post("/package_files")
 @limiter.limit("10/minute")
