@@ -869,69 +869,89 @@ async def analyze_tender_list(
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
-    max_items = 200
+    max_items = 500
     items_to_analyze = titles[:min(max_items, len(titles))]
     
-    # Формируем один промпт для всех тендеров
-    tender_list = "\n".join([f"{i+1}. {t[:200]}" for i, t in enumerate(items_to_analyze)])
+    # Разбиваем на батчи по 50 тендеров (чтобы не превысить лимит токенов)
+    batch_size = 50
+    all_answers = []
     
-    if custom_prompt and custom_prompt.strip():
-        prompt = f"""Оцени каждый тендер по критериям: {custom_prompt.strip()[:300]}.
+    for batch_start in range(0, len(items_to_analyze), batch_size):
+        batch_items = items_to_analyze[batch_start:batch_start + batch_size]
+        tender_list = "\n".join([f"{i+1}. {t[:200]}" for i, t in enumerate(batch_items)])
         
-Для каждого тендера ответь ТОЛЬКО "Да" или "Нет" через запятую, в том же порядке.
+        if custom_prompt and custom_prompt.strip():
+            prompt = f"""Оцени каждый тендер по критериям: {custom_prompt.strip()[:300]}.
+        
+Для каждого тендера напиши ответ в формате:
+Да/Нет | Краткий комментарий (5-7 слов)
 
 Тендеры:
 {tender_list}
 
-Ответ (только Да/Нет через запятую):"""
-    else:
-        prompt = f"""Оцени, интересен ли каждый тендер для поставщика.
-        
-Для каждого тендера ответь ТОЛЬКО "Да" или "Нет" через запятую, в том же порядке.
-
-Тендеры:
-{tender_list}
-
-Ответ (только Да/Нет через запятую):"""
-    
-    # Отправляем ОДИН запрос
-    messages = [
-        {"role": "system", "content": "Отвечай только Да или Нет через запятую. Никаких других слов."},
-        {"role": "user", "content": prompt}
-    ]
-    payload = {
-        "model": MODEL_NAME,
-        "messages": messages,
-        "temperature": 0,
-        "max_tokens": 100,
-        "stream": False
-    }
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    
-    try:
-        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=30)
-        if response.status_code == 200:
-            result = response.json()
-            answer = result["choices"][0]["message"]["content"].strip()
-            answers = [a.strip() for a in answer.replace("\n", ",").split(",")]
+Ответ (строго по одному на строку, в том же порядке):"""
         else:
-            answers = ["Нет"] * len(items_to_analyze)
-    except:
-        answers = ["Нет"] * len(items_to_analyze)
+            prompt = f"""Оцени, интересен ли каждый тендер для поставщика.
+        
+Для каждого тендера напиши ответ в формате:
+Да/Нет | Краткий комментарий (5-7 слов)
+
+Тендеры:
+{tender_list}
+
+Ответ (строго по одному на строку, в том же порядке):"""
+        
+        messages = [
+            {"role": "system", "content": "Отвечай строго в формате: Да/Нет | Комментарий. По одной строке на тендер."},
+            {"role": "user", "content": prompt}
+        ]
+        payload = {
+            "model": MODEL_NAME,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 1500,
+            "stream": False
+        }
+        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+        
+        try:
+            response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=30)
+            if response.status_code == 200:
+                result = response.json()
+                answer = result["choices"][0]["message"]["content"].strip()
+                lines = [line.strip() for line in answer.split('\n') if line.strip()]
+            else:
+                lines = []
+        except:
+            lines = []
+        
+        while len(lines) < len(batch_items):
+            lines.append("Нет | Не удалось проанализировать")
+        
+        all_answers.extend(lines[:len(batch_items)])
     
-    # Дополняем ответы до нужного количества
-    while len(answers) < len(items_to_analyze):
-        answers.append("Нет")
+    # Дополняем ответы до общего количества
+    while len(all_answers) < len(items_to_analyze):
+        all_answers.append("Нет | Не удалось проанализировать")
     
     results = []
     for idx, title in enumerate(items_to_analyze):
         link = links[idx] if idx < len(links) else ""
-        possible = "Да" if idx < len(answers) and "Да" in answers[idx] else "Нет"
+        line = all_answers[idx] if idx < len(all_answers) else "Нет | -"
+        
+        if "|" in line:
+            parts = line.split("|", 1)
+            possible = "Да" if "Да" in parts[0] else "Нет"
+            comment = parts[1].strip() if len(parts) > 1 else ""
+        else:
+            possible = "Да" if "Да" in line else "Нет"
+            comment = ""
+        
         results.append({
             "Название": title,
             "Ссылка": link,
             "Возможен": possible,
-            "Комментарий": ""
+            "Комментарий": comment
         })
 
     output_df = pd.DataFrame(results)
