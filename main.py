@@ -869,59 +869,64 @@ async def analyze_tender_list(
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
-    # Кэш для одинаковых названий
-    title_cache = {}
-    
-    def analyze_title(title, custom_prompt):
-        # Проверяем кэш
-        cache_key = title.strip().lower()
-        if cache_key in title_cache:
-            return title_cache[cache_key], ""
-        
-        if custom_prompt and custom_prompt.strip():
-            prompt = f"""Оцени, подходит ли тендер под критерии: {custom_prompt.strip()[:200]}. Ответь только "Да" или "Нет". Тендер: {title[:300]}"""
-        else:
-            prompt = f"""Оцени, интересен ли тендер для поставщика. Ответь только "Да" или "Нет". Тендер: {title[:300]}"""
-        
-        # Используем быстрый запрос с минимальными токенами
-        messages = [
-            {"role": "system", "content": "Отвечай только Да или Нет"},
-            {"role": "user", "content": prompt}
-        ]
-        payload = {
-            "model": MODEL_NAME,
-            "messages": messages,
-            "temperature": 0,
-            "max_tokens": 5,
-            "stream": False
-        }
-        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-        
-        try:
-            response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                answer = result["choices"][0]["message"]["content"].strip()
-                possible = "Да" if "Да" in answer else "Нет"
-            else:
-                possible = "Нет"
-        except:
-            possible = "Нет"
-        
-        # Сохраняем в кэш
-        title_cache[cache_key] = possible
-        
-        if license_key or device_id:
-            asyncio.create_task(database.increment_usage(license_key=license_key, device_id=device_id, tokens_used=0))
-        
-        return possible, ""
-
     max_items = 200
+    items_to_analyze = titles[:min(max_items, len(titles))]
+    
+    # Формируем один промпт для всех тендеров
+    tender_list = "\n".join([f"{i+1}. {t[:200]}" for i, t in enumerate(items_to_analyze)])
+    
+    if custom_prompt and custom_prompt.strip():
+        prompt = f"""Оцени каждый тендер по критериям: {custom_prompt.strip()[:300]}.
+        
+Для каждого тендера ответь ТОЛЬКО "Да" или "Нет" через запятую, в том же порядке.
+
+Тендеры:
+{tender_list}
+
+Ответ (только Да/Нет через запятую):"""
+    else:
+        prompt = f"""Оцени, интересен ли каждый тендер для поставщика.
+        
+Для каждого тендера ответь ТОЛЬКО "Да" или "Нет" через запятую, в том же порядке.
+
+Тендеры:
+{tender_list}
+
+Ответ (только Да/Нет через запятую):"""
+    
+    # Отправляем ОДИН запрос
+    messages = [
+        {"role": "system", "content": "Отвечай только Да или Нет через запятую. Никаких других слов."},
+        {"role": "user", "content": prompt}
+    ]
+    payload = {
+        "model": MODEL_NAME,
+        "messages": messages,
+        "temperature": 0,
+        "max_tokens": 100,
+        "stream": False
+    }
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    
+    try:
+        response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=30)
+        if response.status_code == 200:
+            result = response.json()
+            answer = result["choices"][0]["message"]["content"].strip()
+            answers = [a.strip() for a in answer.replace("\n", ",").split(",")]
+        else:
+            answers = ["Нет"] * len(items_to_analyze)
+    except:
+        answers = ["Нет"] * len(items_to_analyze)
+    
+    # Дополняем ответы до нужного количества
+    while len(answers) < len(items_to_analyze):
+        answers.append("Нет")
+    
     results = []
-    for idx in range(min(max_items, len(titles))):
-        title = titles[idx]
+    for idx, title in enumerate(items_to_analyze):
         link = links[idx] if idx < len(links) else ""
-        possible, _ = analyze_title(title, custom_prompt)
+        possible = "Да" if idx < len(answers) and "Да" in answers[idx] else "Нет"
         results.append({
             "Название": title,
             "Ссылка": link,
