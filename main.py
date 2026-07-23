@@ -260,53 +260,26 @@ def read_pdf(file_path):
         logger.error(f"❌ [PDF] Ошибка при открытии {file_path}: {e}")
         return f"Ошибка чтения PDF: {e}"
 
-# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА (ИСПРАВЛЕНО) =================
+# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА (ИСПРАВЛЕНО — ДОВЕРЯЕМ РАСШИРЕНИЮ ОТ КЛИЕНТА) =================
 def detect_file_type(content: bytes, filename: str = "") -> str:
+    """
+    Определяет тип файла.
+    Если клиент передал файл с известным расширением — ДОВЕРЯЕМ расширению.
+    Глубокая проверка только если расширения нет или оно неизвестно.
+    """
     ext = os.path.splitext(filename)[1].lower() if filename else ""
 
-    # Маппинг расширений, которым можно доверять
-    trusted_ext_map = {
-        '.docx': 'docx',
-        '.xlsx': 'xlsx',
-        '.xls': 'xls',
-        '.pdf': 'pdf',
-        '.zip': 'zip',
-        '.rar': 'rar',
-        '.7z': '7z',
-        '.png': 'png',
-        '.jpg': 'jpg',
-        '.jpeg': 'jpg',
-        '.rtf': 'rtf',
-        '.txt': 'txt',
-        '.doc': 'doc',
+    # Все известные расширения, которые мы умеем обрабатывать
+    known_extensions = {
+        '.docx', '.xlsx', '.xls', '.pdf', '.zip', '.rar', '.7z',
+        '.png', '.jpg', '.jpeg', '.rtf', '.txt', '.doc'
     }
 
-    if ext in trusted_ext_map:
-        # Проверим соответствие сигнатуры
-        if ext == '.docx' and content.startswith(b'PK'):
-            return 'docx'
-        if ext == '.xlsx' and content.startswith(b'PK'):
-            return 'xlsx'
-        if ext == '.zip' and content.startswith(b'PK'):
-            return 'zip'
-        if ext == '.pdf' and content.startswith(b'%PDF'):
-            return 'pdf'
-        if ext == '.xls' and content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
-            return 'xls'
-        if ext == '.doc' and content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
-            return 'doc'
-        if ext in ('.rar', '.7z', '.png', '.jpg', '.jpeg', '.rtf', '.txt'):
-            return trusted_ext_map[ext]
-        # Для остальных известных расширений — возвращаем тип по расширению
-        if content:
-            return trusted_ext_map[ext]
+    # Если у файла уже есть известное расширение — возвращаем его без проверки содержимого
+    if ext in known_extensions:
+        return ext.lstrip('.')
 
-    # Если расширения нет, или оно неизвестно — глубокая проверка
-    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
-        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
-            return 'xls'
-        return 'doc'
-
+    # Только если расширения нет или оно неизвестно — делаем глубокую проверку
     if content.startswith(b'%PDF'):
         return 'pdf'
 
@@ -314,15 +287,18 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 files = zf.namelist()
-                # Сначала проверяем явные признаки офисных документов
                 if any(f.startswith('xl/') for f in files):
                     return 'xlsx'
                 if any(f.startswith('word/') for f in files):
                     return 'docx'
-                # Если нет — это обычный ZIP
                 return 'zip'
         except:
             return 'zip'
+
+    if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+        if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
+            return 'xls'
+        return 'doc'
 
     if content.startswith(b'Rar!\x1a\x07\x00') or content.startswith(b'Rar!\x1a\x07\x01\x00') or content.startswith(b'Rar!'):
         return 'rar'
