@@ -823,13 +823,6 @@ async def analyze_tender_list(
     file: UploadFile = File(...),
     custom_prompt: str = Form("")
 ):
-    cors_headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, GET, OPTIONS, DELETE, PUT",
-        "Access-Control-Allow-Headers": "*",
-        "Access-Control-Allow-Credentials": "false"
-    }
-
     try:
         await check_access(request)
     except Exception as e:
@@ -921,13 +914,14 @@ async def analyze_tender_list(
 
     return Response(
         output_buffer.getvalue(),
-        media_type="application/octet-stream",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
-            **cors_headers
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "false"
         }
     )
-
 # ================= УПАКОВКА ФАЙЛОВ =================
 @app.post("/package_files")
 @limiter.limit("10/minute")
