@@ -411,6 +411,11 @@ async def download_oferta():
         raise HTTPException(404, "Файл оферты не найден")
     return FileResponse(file_path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename="oferta.docx")
 
+@app.get("/instructions", response_class=HTMLResponse)
+async def instructions_page():
+    with open("templates/instructions.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+        
 @app.get("/privacy-policy", response_class=HTMLResponse)
 async def privacy_policy_page():
     with open("templates/privacy-policy.html", "r", encoding="utf-8") as f:
