@@ -849,104 +849,9 @@ async def analyze_tender_list(
     if df.empty:
         raise HTTPException(400, "Файл пуст")
 
-    # Нормализуем названия столбцов
-    cols = df.columns.tolist()
-
-    # Определяем столбцы
-    title_col = None
-    link_col = None
-    number_col = None
-
-    # Название
-    for c in cols:
-        if 'название' in c.lower() or 'наименование' in c.lower():
-            title_col = c
-            break
-    if not title_col:
-        title_col = cols[0]  # fallback на первый столбец
-
-    # Ссылка
-    for c in cols:
-        if 'ссылка' in c.lower() or 'link' in c.lower() or 'url' in c.lower():
-            link_col = c
-            break
-    if not link_col:
-        for c in cols:
-            sample = df[c].astype(str).head(10)
-            if sample.str.contains(r'https?://', regex=True).any():
-                link_col = c
-                break
-
-    # Номер торга
-    for c in cols:
-        if 'номер' in c.lower() and ('торг' in c.lower() or 'закупк' in c.lower() or 'извещен' in c.lower()):
-            number_col = c
-            break
-    if not number_col:
-        for c in cols:
-            if 'номер' in c.lower():
-                number_col = c
-                break
-
-    # Дата публикации и срок
-    pub_date_col = None
-    deadline_col = None
-    for c in cols:
-        low = c.lower()
-        if 'дата публикации' in low or 'опубликован' in low:
-            pub_date_col = c
-        elif 'срок' in low or 'окончан' in low or 'deadline' in low or 'конец' in low:
-            deadline_col = c
-    if not pub_date_col or not deadline_col:
-        date_candidates = []
-        for c in cols:
-            if c not in [title_col, link_col, number_col]:
-                try:
-                    sample = df[c].dropna().head(5)
-                    if pd.api.types.is_datetime64_any_dtype(sample) or \
-                       sample.astype(str).str.match(r'\d{2}\.\d{2}\.\d{4}').all():
-                        date_candidates.append(c)
-                except:
-                    pass
-        if date_candidates:
-            if len(date_candidates) == 2:
-                d1 = pd.to_datetime(df[date_candidates[0]], errors='coerce', dayfirst=True)
-                d2 = pd.to_datetime(df[date_candidates[1]], errors='coerce', dayfirst=True)
-                if d1.mean() < d2.mean():
-                    pub_date_col = date_candidates[0]
-                    deadline_col = date_candidates[1]
-                else:
-                    pub_date_col = date_candidates[1]
-                    deadline_col = date_candidates[0]
-            elif len(date_candidates) == 1:
-                deadline_col = date_candidates[0]
-                for c in cols:
-                    if 'публик' in c.lower() or 'размещен' in c.lower():
-                        pub_date_col = c
-                        break
-
-    # Извлекаем данные
-    titles = df[title_col].astype(str).tolist()
-    links = df[link_col].astype(str).tolist() if link_col else [""] * len(df)
-    numbers = df[number_col].astype(str).tolist() if number_col else [""] * len(df)
-
-    pub_dates = []
-    if pub_date_col:
-        pub_dates = df[pub_date_col].apply(
-            lambda x: pd.to_datetime(x, errors='coerce', dayfirst=True).strftime('%d.%m.%Y') if pd.notna(x) else ""
-        ).tolist()
-    else:
-        pub_dates = [""] * len(df)
-
-    deadlines = []
-    if deadline_col:
-        deadlines = df[deadline_col].apply(
-            lambda x: pd.to_datetime(x, errors='coerce', dayfirst=True).strftime('%d.%m.%Y') if pd.notna(x) else ""
-        ).tolist()
-    else:
-        deadlines = [""] * len(df)
-
-    logger.info(f"🔗 Колонки: Название='{title_col}', Ссылка='{link_col}', Номер торга='{number_col}', Дата публ.='{pub_date_col}', Срок='{deadline_col}'")
+    # Берём первый столбец как названия тендеров
+    first_col = df.columns[0]
+    titles = df[first_col].astype(str).tolist()
 
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
@@ -1026,15 +931,11 @@ async def analyze_tender_list(
     while len(all_answers) < len(items_to_analyze):
         all_answers.append("Нет | Не удалось проанализировать")
 
-    results = []
-    for idx, title in enumerate(items_to_analyze):
-        link = links[idx] if idx < len(links) else ""
-        number = numbers[idx] if idx < len(numbers) else ""
-        pub_date = pub_dates[idx] if idx < len(pub_dates) else ""
-        deadline = deadlines[idx] if idx < len(deadlines) else ""
+    # Формируем результат: сохраняем все исходные столбцы и добавляем новые
+    possible_list = []
+    comment_list = []
+    for idx in range(len(items_to_analyze)):
         line = all_answers[idx] if idx < len(all_answers) else "Нет | -"
-
-        # Парсим ответ (ожидаем: Да/Нет/Возможно | Комментарий)
         possible = "Нет"
         comment = ""
         if "|" in line:
@@ -1044,36 +945,35 @@ async def analyze_tender_list(
             if decision.lower() in ["да", "нет", "возможно"]:
                 possible = decision.capitalize()
             else:
-                # Попробуем найти знакомое слово в начале
                 for word in ["Да", "Нет", "Возможно"]:
                     if word in decision:
                         possible = word
                         break
         else:
-            # Без комментария — ищем ключевое слово
             for word in ["Да", "Нет", "Возможно"]:
                 if word in line:
                     possible = word
                     break
+        possible_list.append(possible)
+        comment_list.append(comment)
 
-        results.append({
-            "Номер торга": number,
-            "Название": title,
-            "Ссылка": link,
-            "Дата публикации": pub_date,
-            "Срок": deadline,
-            "Возможно": possible,
-            "Комментарий": comment
-        })
+    # Если файл был больше max_items, для остальных строк заполняем "Нет"
+    remaining = len(titles) - len(items_to_analyze)
+    if remaining > 0:
+        possible_list.extend(["Нет"] * remaining)
+        comment_list.extend([""] * remaining)
 
-    output_df = pd.DataFrame(results)
+    # Вставляем новые столбцы после первого столбца
+    first_col_name = df.columns[0]
+    col_index = 1  # позиция после первого столбца
+    df.insert(col_index, "Возможно", possible_list)
+    df.insert(col_index + 1, "Комментарий", comment_list)
+
+    # Сохраняем в Excel с автофильтром
     output_buffer = io.BytesIO()
-
-    # Создаём Excel с автофильтром
     with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-        output_df.to_excel(writer, index=False, sheet_name='Результаты')
+        df.to_excel(writer, index=False, sheet_name='Результаты')
         worksheet = writer.sheets['Результаты']
-        # Включаем автофильтр на весь диапазон данных
         worksheet.auto_filter.ref = worksheet.dimensions
 
     output_buffer.seek(0)
