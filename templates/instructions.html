@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="/static/favicon.png" type="image/png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Инструкция — Тендерный парсер</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .page-wrapper {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 24px;
+            padding: 48px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.15);
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
+        }
+        h1 {
+            font-size: 32px;
+            margin-bottom: 12px;
+            color: #1e293b;
+            font-weight: 800;
+        }
+        h2 {
+            font-size: 24px;
+            margin: 36px 0 16px;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        h2::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: linear-gradient(180deg, #667eea, #764ba2);
+            border-radius: 2px;
+        }
+        p, li {
+            color: #334155;
+            line-height: 1.7;
+            margin-bottom: 12px;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        .step-img {
+            display: block;
+            margin: 20px auto;
+            max-width: 100%;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .btn-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-weight: 700;
+            text-decoration: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 4px 20px rgba(102,126,234,0.4);
+            transition: all 0.3s ease;
+            margin-top: 24px;
+        }
+        .btn-back:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(102,126,234,0.5);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid #e2e8f0;
+            padding: 10px 14px;
+            text-align: left;
+        }
+        th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: #475569;
+        }
+        code {
+            background: #e2e8f0;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+            color: #334155;
+        }
+        .alert {
+            background: #fef9c3;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        @media (max-width: 640px) {
+            .card { padding: 28px; }
+            h1 { font-size: 26px; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-wrapper">
+    <div class="card">
+        <h1>📖 Инструкция по установке и использованию Тендерного парсера</h1>
+
+        <!-- 1. Установка -->
+        <h2>📥 1. Как установить расширение в Яндекс Браузере</h2>
+        <ol>
+            <li>Скачайте файл <code>tender-parser-extension.crx</code> со страницы загрузки.</li>
+            <li>Откройте Яндекс Браузер и в адресной строке введите <code>browser://extensions/</code>, нажмите <b>Enter</b>.</li>
+            <li>В правом верхнем углу страницы включите <b>«Режим разработчика»</b>.</li>
+            <li>Перетащите скачанный файл <code>.crx</code> прямо в окно браузера (на страницу с расширениями).</li>
+            <li>Подтвердите установку в появившемся диалоговом окне.</li>
+            <li>Убедитесь, что переключатель рядом с расширением <b>включён</b> (зелёный/активный).</li>
+        </ol>
+        <!-- Картинка 1: расширение установлено и активно -->
+        <img src="/static/instructions/step1.png" alt="Расширение активно" class="step-img" id="img1">
+        <p style="font-size: 13px; color: #64748b; text-align: center;">Картинка 1: Расширение установлено и включено</p>
+
+        <p class="alert">
+            ⚠️ <b>Важно:</b> при каждом новом запуске Яндекс Браузера проверяйте, что расширение активно. 
+            Для этого откройте <code>browser://extensions/</code> и убедитесь, что переключатель рядом с «Тендерный парсер» включён. 
+            Если расширение отключено — включите его вручную.
+        </p>
+
+        <!-- 2. Активация -->
+        <h2>🔑 2. Активация лицензии и пробный период</h2>
+        <ol>
+            <li>Нажмите на иконку расширения в панели инструментов браузера.</li>
+            <li>Если у вас ещё нет лицензии, вы можете:
+                <ul>
+                    <li><b>Купить лицензию</b> – нажмите кнопку <b>«💳 Купить»</b> или перейдите по ссылке <b>«Купить лицензию»</b> в блоке активации.</li>
+                    <li><b>Использовать пробный период</b> – после установки автоматически даётся 2 дня пробного доступа.</li>
+                </ul>
+            </li>
+            <li>Для активации купленной лицензии:
+                <ul>
+                    <li>Введите лицензионный ключ в поле ввода.</li>
+                    <li>Нажмите <b>«🔑 Активировать»</b>.</li>
+                    <li>После успешной активации появится надпись «✅ Лицензия активна», и откроется основной интерфейс.</li>
+                </ul>
+            </li>
+        </ol>
+        <!-- Картинка 2: основной интерфейс расширения -->
+        <img src="/static/instructions/step2.png" alt="Основной интерфейс" class="step-img" id="img2">
+        <p style="font-size: 13px; color: #64748b; text-align: center;">Картинка 2: Основной интерфейс расширения</p>
+
+        <!-- 3. Элементы интерфейса -->
+        <h2>🧩 3. Основные элементы интерфейса</h2>
+        <table>
+            <tr><th>Кнопка / Элемент</th><th>Назначение</th></tr>
+            <tr><td>🔍 Собрать все</td><td>Краткий анализ всех тендеров на странице списка закупок.</td></tr>
+            <tr><td>📄 Анализировать текущий</td><td>Расширенный анализ конкретного тендера с учётом вашего промпта.</td></tr>
+            <tr><td>📊 Анализировать список (Excel)</td><td>Загрузка Excel-файла со списком тендеров (до 150 строк) и быстрый анализ с комментариями.</td></tr>
+            <tr><td>🏦 Подать заявку на банковскую гарантию</td><td>Открывает форму для оформления гарантии по текущему тендеру.</td></tr>
+            <tr><td>⚙️ Настроить промпт для ИИ</td><td>Окно для ввода личной инструкции нейросети (учитывается при анализе текущего тендера и Excel).</td></tr>
+            <tr><td>💳 Купить</td><td>Ссылка на страницу оплаты лицензии.</td></tr>
+            <tr><td>🔑 Активировать лицензию</td><td>Повторно открывает поле ввода ключа.</td></tr>
+            <tr><td>📂 Скачать файлы</td><td>При включении во время «Собрать все» также загружает все документы тендеров.</td></tr>
+        </table>
+        <!-- Картинка 3: модальное окно с вводом промпта -->
+        <img src="/static/instructions/step3.png" alt="Настройка промпта" class="step-img" id="img3">
+        <p style="font-size: 13px; color: #64748b; text-align: center;">Картинка 3: Окно ввода личного промпта</p>
+
+        <!-- 4. Как использовать -->
+        <h2>🧑‍💻 4. Как использовать каждую функцию</h2>
+
+        <h3>4.1 Быстрый анализ списка тендеров («Собрать все»)</h3>
+        <ol>
+            <li>Перейдите на страницу со списком закупок на zakupki.gov.ru.</li>
+            <li>Откройте расширение, отметьте нужные параметры анализа.</li>
+            <li>При необходимости укажите количество тендеров и поставьте галочку «📂 Скачать файлы».</li>
+            <li>Нажмите <b>«🔍 Собрать все»</b>.</li>
+            <li>Дождитесь завершения (статус будет отображаться внизу окна). Браузер скачает один или два ZIP-архива: с анализом и, если выбрано, с документами.</li>
+        </ol>
+        <!-- Картинка 4: использование кнопки «Собрать все» -->
+        <img src="/static/instructions/step4.png" alt="Кнопка Собрать все" class="step-img" id="img4">
+        <p style="font-size: 13px; color: #64748b; text-align: center;">Картинка 4: Анализ списка тендеров на странице</p>
+
+        <h3>4.2 Расширенный анализ текущего тендера</h3>
+        <ol>
+            <li>Зайдите на страницу конкретного тендера.</li>
+            <li>При желании задайте личный промпт через «⚙️ Настроить промпт для ИИ».</li>
+            <li>Выберите параметры и нажмите <b>«📄 Анализировать текущий»</b>.</li>
+            <li>Ожидайте завершения (может занять несколько минут). Скачается ZIP-архив с полным отчётом и файлами.</li>
+        </ol>
+
+        <h3>4.3 Анализ своего списка тендеров из Excel</h3>
+        <ol>
+            <li>Подготовьте Excel-файл, где <b>первый столбец</b> — названия тендеров.</li>
+            <li>Нажмите <b>«📊 Анализировать список тендеров (Excel)»</b> и выберите файл.</li>
+            <li>Дождитесь завершения. Браузер скачает Excel-файл с добавленными столбцами «Возможно» и «Комментарий», а также автофильтром.</li>
+        </ol>
+        <p>📌 <b>Ограничение:</b> максимальное количество строк для анализа — <b>150</b>. Остальные строки сохранятся без анализа с пометкой «Нет».</p>
+
+        <h3>4.4 Заявка на банковскую гарантию</h3>
+        <ol>
+            <li>Находясь на странице тендера, откройте расширение.</li>
+            <li>Нажмите <b>«🏦 Подать заявку на банковскую гарантию»</b>.</li>
+            <li>Расширение соберёт данные и откроет форму на сайте csb24-tender.ru.</li>
+            <li>Заполните контактные данные (имя, ИНН, телефон, email) и отправьте заявку.</li>
+            <li>С вами свяжется менеджер для дальнейшего оформления гарантии.</li>
+        </ol>
+        <!-- Картинка 5: форма заявки на банковскую гарантию -->
+        <img src="/static/instructions/step5.png" alt="Форма гарантии" class="step-img" id="img5">
+        <p style="font-size: 13px; color: #64748b; text-align: center;">Картинка 5: Форма отправки заявки на гарантию</p>
+
+        <a href="/" class="btn-back">🏠 Вернуться на главную</a>
+    </div>
+</div>
+</body>
+</html>
