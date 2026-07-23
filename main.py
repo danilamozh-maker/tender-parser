@@ -849,71 +849,164 @@ async def analyze_tender_list(
     if df.empty:
         raise HTTPException(400, "Файл пуст")
 
-    first_col = df.columns[0]
-    titles = df[first_col].astype(str).tolist()
+    # Нормализуем названия столбцов
+    cols = df.columns.tolist()
 
+    # Определяем столбцы
+    title_col = None
     link_col = None
-    for col in df.columns:
-        sample = df[col].astype(str).head(10)
-        if sample.str.contains(r'https?://', regex=True).any():
-            link_col = col
-            break
+    number_col = None
 
-    if link_col is None:
-        links = [""] * len(df)
-        logger.warning("⚠️ Колонка со ссылками не найдена, ссылки будут пустыми")
+    # Название
+    for c in cols:
+        if 'название' in c.lower() or 'наименование' in c.lower():
+            title_col = c
+            break
+    if not title_col:
+        title_col = cols[0]  # fallback на первый столбец
+
+    # Ссылка
+    for c in cols:
+        if 'ссылка' in c.lower() or 'link' in c.lower() or 'url' in c.lower():
+            link_col = c
+            break
+    if not link_col:
+        for c in cols:
+            sample = df[c].astype(str).head(10)
+            if sample.str.contains(r'https?://', regex=True).any():
+                link_col = c
+                break
+
+    # Номер торга
+    for c in cols:
+        if 'номер' in c.lower() and ('торг' in c.lower() or 'закупк' in c.lower() or 'извещен' in c.lower()):
+            number_col = c
+            break
+    if not number_col:
+        for c in cols:
+            if 'номер' in c.lower():
+                number_col = c
+                break
+
+    # Дата публикации и срок
+    pub_date_col = None
+    deadline_col = None
+    for c in cols:
+        low = c.lower()
+        if 'дата публикации' in low or 'опубликован' in low:
+            pub_date_col = c
+        elif 'срок' in low or 'окончан' in low or 'deadline' in low or 'конец' in low:
+            deadline_col = c
+    if not pub_date_col or not deadline_col:
+        date_candidates = []
+        for c in cols:
+            if c not in [title_col, link_col, number_col]:
+                try:
+                    sample = df[c].dropna().head(5)
+                    if pd.api.types.is_datetime64_any_dtype(sample) or \
+                       sample.astype(str).str.match(r'\d{2}\.\d{2}\.\d{4}').all():
+                        date_candidates.append(c)
+                except:
+                    pass
+        if date_candidates:
+            if len(date_candidates) == 2:
+                d1 = pd.to_datetime(df[date_candidates[0]], errors='coerce', dayfirst=True)
+                d2 = pd.to_datetime(df[date_candidates[1]], errors='coerce', dayfirst=True)
+                if d1.mean() < d2.mean():
+                    pub_date_col = date_candidates[0]
+                    deadline_col = date_candidates[1]
+                else:
+                    pub_date_col = date_candidates[1]
+                    deadline_col = date_candidates[0]
+            elif len(date_candidates) == 1:
+                deadline_col = date_candidates[0]
+                for c in cols:
+                    if 'публик' in c.lower() or 'размещен' in c.lower():
+                        pub_date_col = c
+                        break
+
+    # Извлекаем данные
+    titles = df[title_col].astype(str).tolist()
+    links = df[link_col].astype(str).tolist() if link_col else [""] * len(df)
+    numbers = df[number_col].astype(str).tolist() if number_col else [""] * len(df)
+
+    pub_dates = []
+    if pub_date_col:
+        pub_dates = df[pub_date_col].apply(
+            lambda x: pd.to_datetime(x, errors='coerce', dayfirst=True).strftime('%d.%m.%Y') if pd.notna(x) else ""
+        ).tolist()
     else:
-        links = df[link_col].astype(str).tolist()
-        logger.info(f"🔗 Колонка со ссылками: {link_col}")
+        pub_dates = [""] * len(df)
+
+    deadlines = []
+    if deadline_col:
+        deadlines = df[deadline_col].apply(
+            lambda x: pd.to_datetime(x, errors='coerce', dayfirst=True).strftime('%d.%m.%Y') if pd.notna(x) else ""
+        ).tolist()
+    else:
+        deadlines = [""] * len(df)
+
+    logger.info(f"🔗 Колонки: Название='{title_col}', Ссылка='{link_col}', Номер торга='{number_col}', Дата публ.='{pub_date_col}', Срок='{deadline_col}'")
 
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
-    max_items = 500
+    max_items = 200
     items_to_analyze = titles[:min(max_items, len(titles))]
-    
-    # Разбиваем на батчи по 50 тендеров (чтобы не превысить лимит токенов)
+
+    # Разбиваем на батчи по 50 тендеров
     batch_size = 50
     all_answers = []
-    
+
     for batch_start in range(0, len(items_to_analyze), batch_size):
         batch_items = items_to_analyze[batch_start:batch_start + batch_size]
         tender_list = "\n".join([f"{i+1}. {t[:200]}" for i, t in enumerate(batch_items)])
-        
+
         if custom_prompt and custom_prompt.strip():
-            prompt = f"""Оцени каждый тендер по критериям: {custom_prompt.strip()[:300]}.
-        
-Для каждого тендера напиши ответ в формате:
-Да/Нет | Краткий комментарий (5-7 слов)
+            prompt = f"""Внимательно прочитай название каждого тендера и оцени, соответствует ли он критериям пользователя:
+{custom_prompt.strip()[:300]}
+
+Правила оценки:
+- Отвечай "Да", если тендер **точно** подходит под критерии.
+- Отвечай "Нет", если тендер **явно не подходит**.
+- Отвечай "Возможно", если есть сомнения, но потенциально может подойти.
+
+Для каждого тендера напиши ответ строго в формате:
+Да/Нет/Возможно | Краткий комментарий (5-7 слов)
 
 Тендеры:
 {tender_list}
 
 Ответ (строго по одному на строку, в том же порядке):"""
         else:
-            prompt = f"""Оцени, интересен ли каждый тендер для поставщика.
-        
-Для каждого тендера напиши ответ в формате:
-Да/Нет | Краткий комментарий (5-7 слов)
+            prompt = f"""Внимательно прочитай название каждого тендера. Оцени, интересен ли он для поставщика.
+
+Правила оценки:
+- Отвечай "Да", если тендер **точно** интересен.
+- Отвечай "Нет", если тендер **явно не интересен**.
+- Отвечай "Возможно", если есть сомнения, но потенциально может быть интересен.
+
+Для каждого тендера напиши ответ строго в формате:
+Да/Нет/Возможно | Краткий комментарий (5-7 слов)
 
 Тендеры:
 {tender_list}
 
 Ответ (строго по одному на строку, в том же порядке):"""
-        
+
         messages = [
-            {"role": "system", "content": "Отвечай строго в формате: Да/Нет | Комментарий. По одной строке на тендер."},
+            {"role": "system", "content": "Ты — эксперт по анализу тендеров. Отвечай строго в формате: Да/Нет/Возможно | Комментарий. По одной строке на тендер. Будь внимателен и консервативен."},
             {"role": "user", "content": prompt}
         ]
         payload = {
             "model": MODEL_NAME,
             "messages": messages,
-            "temperature": 0.3,
+            "temperature": 0,
             "max_tokens": 1500,
             "stream": False
         }
         headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-        
+
         try:
             response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=30)
             if response.status_code == 200:
@@ -924,40 +1017,65 @@ async def analyze_tender_list(
                 lines = []
         except:
             lines = []
-        
+
         while len(lines) < len(batch_items):
             lines.append("Нет | Не удалось проанализировать")
-        
+
         all_answers.extend(lines[:len(batch_items)])
-    
-    # Дополняем ответы до общего количества
+
     while len(all_answers) < len(items_to_analyze):
         all_answers.append("Нет | Не удалось проанализировать")
-    
+
     results = []
     for idx, title in enumerate(items_to_analyze):
         link = links[idx] if idx < len(links) else ""
+        number = numbers[idx] if idx < len(numbers) else ""
+        pub_date = pub_dates[idx] if idx < len(pub_dates) else ""
+        deadline = deadlines[idx] if idx < len(deadlines) else ""
         line = all_answers[idx] if idx < len(all_answers) else "Нет | -"
-        
+
+        # Парсим ответ (ожидаем: Да/Нет/Возможно | Комментарий)
+        possible = "Нет"
+        comment = ""
         if "|" in line:
             parts = line.split("|", 1)
-            possible = "Да" if "Да" in parts[0] else "Нет"
+            decision = parts[0].strip()
             comment = parts[1].strip() if len(parts) > 1 else ""
+            if decision.lower() in ["да", "нет", "возможно"]:
+                possible = decision.capitalize()
+            else:
+                # Попробуем найти знакомое слово в начале
+                for word in ["Да", "Нет", "Возможно"]:
+                    if word in decision:
+                        possible = word
+                        break
         else:
-            possible = "Да" if "Да" in line else "Нет"
-            comment = ""
-        
+            # Без комментария — ищем ключевое слово
+            for word in ["Да", "Нет", "Возможно"]:
+                if word in line:
+                    possible = word
+                    break
+
         results.append({
+            "Номер торга": number,
             "Название": title,
             "Ссылка": link,
-            "Возможен": possible,
+            "Дата публикации": pub_date,
+            "Срок": deadline,
+            "Возможно": possible,
             "Комментарий": comment
         })
 
     output_df = pd.DataFrame(results)
     output_buffer = io.BytesIO()
+
+    # Создаём Excel с автофильтром
     with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-        output_df.to_excel(writer, index=False)
+        output_df.to_excel(writer, index=False, sheet_name='Результаты')
+        worksheet = writer.sheets['Результаты']
+        # Включаем автофильтр на весь диапазон данных
+        worksheet.auto_filter.ref = worksheet.dimensions
+
     output_buffer.seek(0)
 
     filename = f"анализ_списка_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
