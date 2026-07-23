@@ -869,28 +869,51 @@ async def analyze_tender_list(
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
+    # Кэш для одинаковых названий
+    title_cache = {}
+    
     def analyze_title(title, custom_prompt):
+        # Проверяем кэш
+        cache_key = title.strip().lower()
+        if cache_key in title_cache:
+            return title_cache[cache_key], ""
+        
         if custom_prompt and custom_prompt.strip():
-            prompt = f"""Ты — эксперт по тендерам. У тебя есть промпт пользователя, который описывает его специализацию и критерии отбора тендеров.
-Промпт пользователя:
-{custom_prompt}
-
-Оцени, подходит ли данный тендер под критерии пользователя. Ответь ТОЛЬКО одним словом: Да или Нет.
-
-Название тендера: {title}
-"""
+            prompt = f"""Оцени, подходит ли тендер под критерии: {custom_prompt.strip()[:200]}. Ответь только "Да" или "Нет". Тендер: {title[:300]}"""
         else:
-            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь ТОЛЬКО одним словом: Да или Нет.
-
-Название тендера: {title}
-"""
-        answer = query_deepseek(prompt, license_key, device_id)
-        possible = "Нет"
-        for line in answer.split('\n'):
-            if "Да" in line and "Нет" not in line:
-                possible = "Да"
-            elif "Нет" in line:
+            prompt = f"""Оцени, интересен ли тендер для поставщика. Ответь только "Да" или "Нет". Тендер: {title[:300]}"""
+        
+        # Используем быстрый запрос с минимальными токенами
+        messages = [
+            {"role": "system", "content": "Отвечай только Да или Нет"},
+            {"role": "user", "content": prompt}
+        ]
+        payload = {
+            "model": MODEL_NAME,
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": 5,
+            "stream": False
+        }
+        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+        
+        try:
+            response = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=30)
+            if response.status_code == 200:
+                result = response.json()
+                answer = result["choices"][0]["message"]["content"].strip()
+                possible = "Да" if "Да" in answer else "Нет"
+            else:
                 possible = "Нет"
+        except:
+            possible = "Нет"
+        
+        # Сохраняем в кэш
+        title_cache[cache_key] = possible
+        
+        if license_key or device_id:
+            asyncio.create_task(database.increment_usage(license_key=license_key, device_id=device_id, tokens_used=0))
+        
         return possible, ""
 
     max_items = 200
