@@ -255,10 +255,10 @@ def read_pdf(file_path):
         text = text.strip()
         if not text:
             logger.info(f"⚠️ [PDF] {file_path} не содержит текста (возможно, сканированный)")
-        return text if text else "PDF не содержит текста (возможно, сканированный документ)"
+        return text if text else ""
     except Exception as e:
-        logger.error(f"❌ [PDF] Ошибка при открытии {file_path}: {e}")
-        return f"Ошибка чтения PDF: {e}"
+        logger.warning(f"⚠️ [PDF] Не удалось прочитать {os.path.basename(file_path)}: {e}")
+        return ""
 
 def detect_file_type(content: bytes, filename: str = "") -> str:
     """
