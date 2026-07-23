@@ -907,16 +907,7 @@ async def analyze_tender_list(
 Ответ (строго по одному на строку, в том же порядке):"""
 
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Ты — эксперт по анализу тендеров. "
-                    "Отвечай строго в формате: Да/Нет/Возможно | Комментарий. "
-                    "По одной строке на каждый тендер. "
-                    "Количество строк в ответе должно точно совпадать с количеством тендеров в списке. "
-                    "Будь внимателен и консервативен."
-                )
-            },
+            {"role": "system", "content": "Ты — эксперт по анализу тендеров. Отвечай строго в формате: Да/Нет/Возможно | Комментарий. По одной строке на каждый тендер. Количество строк в ответе должно точно совпадать с количеством тендеров в списке. Будь внимателен и консервативен."},
             {"role": "user", "content": prompt}
         ]
         payload = {
@@ -984,12 +975,39 @@ async def analyze_tender_list(
     df.insert(col_index, "Возможно", possible_list)
     df.insert(col_index + 1, "Комментарий", comment_list)
 
-    # Сохраняем в Excel с автофильтром
+    # Сохраняем в Excel с автофильтром и настройкой переноса текста
     output_buffer = io.BytesIO()
+    from openpyxl.styles import Alignment
+
     with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Результаты')
         worksheet = writer.sheets['Результаты']
         worksheet.auto_filter.ref = worksheet.dimensions
+
+        # Настройка ширины столбцов и переноса текста для новых столбцов
+        # Индексация столбцов: 1 = "Возможно", 2 = "Комментарий" (0-based после Pandas)
+        wrap_columns = [1, 2]  # столбцы B и C
+
+        for col_idx in wrap_columns:
+            col_letter = worksheet.cell(row=1, column=col_idx + 1).column_letter  # openpyxl 1-based
+
+            # Устанавливаем ширину столбца
+            if col_idx == 1:
+                worksheet.column_dimensions[col_letter].width = 18  # "Возможно"
+            else:
+                worksheet.column_dimensions[col_letter].width = 50  # "Комментарий"
+
+            # Применяем перенос текста ко всем ячейкам столбца (кроме заголовка, если нужно)
+            for row in range(2, worksheet.max_row + 1):
+                cell = worksheet.cell(row=row, column=col_idx + 1)
+                cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+        # Опционально: можно сделать автоподбор ширины для первого столбца (названия)
+        first_col_letter = worksheet.cell(row=1, column=1).column_letter
+        worksheet.column_dimensions[first_col_letter].width = 40
+        for row in range(2, worksheet.max_row + 1):
+            cell = worksheet.cell(row=row, column=1)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
 
     output_buffer.seek(0)
 
