@@ -863,7 +863,7 @@ async def analyze_tender_list(
     license_key = request.headers.get("X-License-Key")
     device_id = request.headers.get("X-Device-ID")
 
-    max_items = 200
+    max_items = 120
     items_to_analyze = titles[:min(max_items, len(titles))]
 
     # Разбиваем на батчи по 50 тендеров
