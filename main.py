@@ -260,22 +260,51 @@ def read_pdf(file_path):
         logger.error(f"❌ [PDF] Ошибка при открытии {file_path}: {e}")
         return f"Ошибка чтения PDF: {e}"
 
-# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА =================
+# ================= ОПРЕДЕЛЕНИЕ ТИПА ФАЙЛА (ИСПРАВЛЕНО) =================
 def detect_file_type(content: bytes, filename: str = "") -> str:
     ext = os.path.splitext(filename)[1].lower() if filename else ""
 
+    # Маппинг расширений, которым можно доверять
+    trusted_ext_map = {
+        '.docx': 'docx',
+        '.xlsx': 'xlsx',
+        '.xls': 'xls',
+        '.pdf': 'pdf',
+        '.zip': 'zip',
+        '.rar': 'rar',
+        '.7z': '7z',
+        '.png': 'png',
+        '.jpg': 'jpg',
+        '.jpeg': 'jpg',
+        '.rtf': 'rtf',
+        '.txt': 'txt',
+        '.doc': 'doc',
+    }
+
+    if ext in trusted_ext_map:
+        # Проверим соответствие сигнатуры
+        if ext == '.docx' and content.startswith(b'PK'):
+            return 'docx'
+        if ext == '.xlsx' and content.startswith(b'PK'):
+            return 'xlsx'
+        if ext == '.zip' and content.startswith(b'PK'):
+            return 'zip'
+        if ext == '.pdf' and content.startswith(b'%PDF'):
+            return 'pdf'
+        if ext == '.xls' and content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+            return 'xls'
+        if ext == '.doc' and content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+            return 'doc'
+        if ext in ('.rar', '.7z', '.png', '.jpg', '.jpeg', '.rtf', '.txt'):
+            return trusted_ext_map[ext]
+        # Для остальных известных расширений — возвращаем тип по расширению
+        if content:
+            return trusted_ext_map[ext]
+
+    # Если расширения нет, или оно неизвестно — глубокая проверка
     if content.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
         if b'WorkBook' in content[:2000] or b'BOUNDSHEET' in content[:2000]:
             return 'xls'
-        return 'doc'
-
-    if ext == '.doc':
-        try:
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                if any(f.startswith('word/') for f in zf.namelist()):
-                    return 'docx'
-        except:
-            pass
         return 'doc'
 
     if content.startswith(b'%PDF'):
@@ -285,10 +314,12 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 files = zf.namelist()
-                if any(f.startswith('word/') for f in files):
-                    return 'docx'
+                # Сначала проверяем явные признаки офисных документов
                 if any(f.startswith('xl/') for f in files):
                     return 'xlsx'
+                if any(f.startswith('word/') for f in files):
+                    return 'docx'
+                # Если нет — это обычный ZIP
                 return 'zip'
         except:
             return 'zip'
@@ -304,8 +335,6 @@ def detect_file_type(content: bytes, filename: str = "") -> str:
     if content.startswith(b'{\\rtf'):
         return 'rtf'
 
-    if ext == '.doc':
-        return 'doc'
     return 'unknown'
 
 # ================= ЗАПРОСЫ К DEEPSEEK =================
@@ -826,15 +855,12 @@ async def analyze_tender_list(
     file: UploadFile = File(...),
     custom_prompt: str = Form("")
 ):
-    # ===== ВРЕМЕННЫЕ CORS-ЗАГОЛОВКИ (КОСТЫЛЬ) =====
-    # Добавляем их вручную, чтобы балансировщик не затирал
     cors_headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, GET, OPTIONS, DELETE, PUT",
         "Access-Control-Allow-Headers": "*",
         "Access-Control-Allow-Credentials": "false"
     }
-    # =================================================
 
     try:
         await check_access(request)
@@ -922,11 +948,9 @@ async def analyze_tender_list(
     filename = f"анализ_списка_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     encoded = quote(filename)
 
-    # Принудительная очистка памяти
     gc.collect()
     logger.info(f"✅ [DONE] Список обработан, файл отправлен клиенту")
 
-    # ===== ВОЗВРАЩАЕМ ОТВЕТ С CORS-ЗАГОЛОВКАМИ =====
     return Response(
         output_buffer.getvalue(),
         media_type="application/octet-stream",
