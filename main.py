@@ -972,7 +972,7 @@ async def analyze_tender_list(
 
     # Вставляем новые столбцы после первого столбца
     col_index = 1  # позиция после первого столбца
-    df.insert(col_index, "Возможно", possible_list)
+    df.insert(col_index, "Участие", possible_list)
     df.insert(col_index + 1, "Комментарий", comment_list)
 
     # Сохраняем в Excel с автофильтром и настройкой переноса текста
@@ -985,7 +985,7 @@ async def analyze_tender_list(
         worksheet.auto_filter.ref = worksheet.dimensions
 
         # Настройка ширины столбцов и переноса текста для новых столбцов
-        # Индексация столбцов: 1 = "Возможно", 2 = "Комментарий" (0-based после Pandas)
+        # Индексация столбцов: 1 = "Участие", 2 = "Комментарий" (0-based после Pandas)
         wrap_columns = [1, 2]  # столбцы B и C
 
         for col_idx in wrap_columns:
