@@ -36,7 +36,7 @@
             height: 4px;
             background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
         }
-       
+
         /* Hero */
         .hero {
             text-align: center;
@@ -89,7 +89,7 @@
             background: linear-gradient(135deg, #667eea, #764ba2);
             box-shadow: 0 2px 10px rgba(102,126,234,0.3);
         }
-       
+
         /* Features */
         .features-grid {
             display: grid;
@@ -136,17 +136,7 @@
             font-size: 13px;
             line-height: 1.5;
         }
-        .coming-soon {
-            background: linear-gradient(135deg, #fef9c3, #fde047);
-            color: #854d0e;
-            font-size: 11px;
-            padding: 3px 10px;
-            border-radius: 12px;
-            display: inline-block;
-            margin-left: 6px;
-            font-weight: 600;
-        }
-       
+
         /* Section */
         .section {
             margin: 40px 0;
@@ -170,7 +160,7 @@
             background: linear-gradient(180deg, #667eea, #764ba2);
             border-radius: 2px;
         }
-       
+
         /* Download */
         .download-block {
             background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
@@ -222,54 +212,7 @@
             cursor: not-allowed;
             transform: none !important;
         }
-       
-        /* Details */
-        details {
-            margin-top: 16px;
-            font-size: 14px;
-            color: #64748b;
-            background: #f8fafc;
-            border-radius: 12px;
-            overflow: hidden;
-        }
-        details summary {
-            padding: 12px 16px;
-            cursor: pointer;
-            font-weight: 600;
-            color: #475569;
-            list-style: none;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.2s ease;
-        }
-        details summary:hover {
-            background: #f1f5f9;
-        }
-        details summary::-webkit-details-marker { display: none; }
-        details summary::before {
-            content: '▶';
-            font-size: 10px;
-            transition: transform 0.2s ease;
-        }
-        details[open] summary::before {
-            transform: rotate(90deg);
-        }
-        details ol {
-            padding: 0 16px 16px 40px;
-            color: #475569;
-            line-height: 1.7;
-        }
-        details ol li { margin-bottom: 8px; }
-        code {
-            background: #e2e8f0;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-size: 13px;
-            font-family: 'Courier New', monospace;
-            color: #334155;
-        }
-       
+
         /* Price */
         .price-block {
             background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
@@ -302,7 +245,7 @@
             font-size: 14px;
             margin-top: 4px;
         }
-       
+
         /* Status */
         .loader {
             border: 3px solid #e2e8f0;
@@ -325,7 +268,7 @@
         }
         .status-msg.success { background: #ecfdf5; color: #059669; }
         .status-msg.error { background: #fef2f2; color: #dc2626; }
-       
+
         /* Links */
         .links-row {
             display: flex;
@@ -348,7 +291,7 @@
             color: #764ba2;
             text-decoration: underline;
         }
-       
+
         /* Legal */
         .legal {
             font-size: 12px;
@@ -361,9 +304,9 @@
         .legal p { margin: 4px 0; }
         .legal a { color: #667eea; text-decoration: none; }
         .legal a:hover { text-decoration: underline; }
-       
+
         .hidden { display: none !important; }
-       
+
         /* Responsive */
         @media (max-width: 640px) {
             .card { padding: 28px; border-radius: 20px; }
@@ -406,7 +349,7 @@
             <div class="feature-card">
                 <span class="icon">🎯</span>
                 <strong>Анализ текущего тендера</strong>
-                <p>Находясь на странице конкретного тендера, проанализируйте его отдельно без сбора всей страницы.</p>
+                <p>Проводится с учётом вашего введённого промпта и критически анализирует возможность исполнения вами данного тендера.</p>
             </div>
             <div class="feature-card">
                 <span class="icon">📈</span>
@@ -414,19 +357,21 @@
                 <p>Все результаты сохраняются в удобный Word-документ с разбивкой по тендерам.</p>
             </div>
             <div class="feature-card">
-                <span class="icon">📱</span>
-                <strong>Поддержка 44-ФЗ и 223-ФЗ</strong>
-                <p>Работа с обоими типами закупок, автоматическое определение формата.</p>
+                <span class="icon">📊</span>
+                <strong>Анализ списка Excel</strong>
+                <p>Загрузите Excel-файл, полученный с тендерных площадок, и получите быстрый анализ с комментариями (до 150 строк).</p>
             </div>
             <div class="feature-card">
-                <span class="icon">🔜</span>
-                <strong>Банковские гарантии </strong>
+                <span class="icon">🏦</span>
+                <strong>Банковские гарантии</strong>
                 <p>Автоматическая отправка запросов на получение банковской гарантии прямо из расширения.</p>
             </div>
         </div>
-<a href="/static/prezentatsiya.pdf" target="_blank" class="btn btn-primary" style="background: #667eea;">
-    📊 Как работает наш продукт
-</a>
+
+        <a href="/static/prezentatsiya.pdf" target="_blank" class="btn btn-primary" style="background: #667eea;">
+            📊 Как работает наш продукт
+        </a>
+
         <!-- Скачивание расширения -->
         <div class="section">
             <h2 class="section-title">Скачать расширение</h2>
@@ -436,26 +381,29 @@
                     📥 Скачать расширение (.crx)
                 </a>
             </div>
-            <details>
-    <summary>📖 Как установить в Яндекс Браузере</summary>
-    <ol>
-        <li>Скачайте файл <code>tender-parser-extension.crx</code>.</li>
-        <li>Откройте Яндекс Браузер и в адресной строке введите <code>browser://extensions/</code> и нажмите Enter.</li>
-        <li>В правом верхнем углу страницы включите <strong>«Режим разработчика»</strong>.</li>
-        <li>Перетащите скачанный файл <code>.crx</code> в окно браузера (на страницу с расширениями).</li>
-        <li>Подтвердите установку в появившемся диалоговом окне.</li>
-        <li><strong>Важно:</strong> убедитесь, что переключатель рядом с расширением <strong>включён</strong> (зелёный/активный).</li>
-        <li>Готово! Расширение появится в панели браузера.</li>
-    </ol>
-    <p style="font-size: 12px; color: #94a3b8; margin-top: 8px;">
-        ⚠️ <strong>Важно:</strong> при каждом новом запуске Яндекс Браузера проверяйте, что расширение включено. 
-        Для этого откройте <code>browser://extensions/</code> и убедитесь, что переключатель рядом с «Тендерный парсер» активен. 
-        Если расширение отключено — включите его вручную.
-    </p>
-    <p style="font-size: 12px; color: #94a3b8; margin-top: 4px;">
-        * Если установка не удаётся, попробуйте перезагрузить браузер или отключить и снова включить режим разработчика.
-    </p>
-</details>
+
+            <!-- Кнопка-ссылка на инструкцию (вместо старого <details>) -->
+            <div style="margin-top: 24px; text-align: center;">
+                <a href="/instructions" class="btn btn-secondary" style="
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 10px;
+                    background: white;
+                    color: #667eea;
+                    border: 2px solid #667eea;
+                    padding: 14px 28px;
+                    border-radius: 12px;
+                    font-weight: 700;
+                    font-size: 16px;
+                    text-decoration: none;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 2px 10px rgba(102,126,234,0.1);
+                " onmouseover="this.style.background='#667eea'; this.style.color='white';"
+                   onmouseout="this.style.background='white'; this.style.color='#667eea';">
+                    📖 Инструкция по установке и использованию расширения
+                </a>
+            </div>
         </div>
 
         <!-- Покупка лицензии -->
@@ -511,7 +459,6 @@
             const data = await response.json();
 
             if (data.confirmation_url) {
-                // Перенаправляем на страницу оплаты ЮKassa
                 window.location.href = data.confirmation_url;
             } else {
                 throw new Error('Не получена ссылка для оплаты');
