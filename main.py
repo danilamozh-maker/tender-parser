@@ -814,7 +814,6 @@ async def analyze_tender_with_files(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
     )
-
 # ================= ЭНДПОЙНТ АНАЛИЗА СПИСКА ТЕНДЕРОВ ИЗ EXCEL =================
 @app.options("/analyze_tender_list")
 async def analyze_tender_list_options():
@@ -876,40 +875,35 @@ async def analyze_tender_list(
 Промпт пользователя:
 {custom_prompt}
 
-Оцени, подходит ли данный тендер под критерии пользователя. Ответь в формате:
-Возможен: Да/Нет
-Комментарий: (краткое пояснение, почему да или нет)
+Оцени, подходит ли данный тендер под критерии пользователя. Ответь ТОЛЬКО одним словом: Да или Нет.
 
 Название тендера: {title}
 """
         else:
-            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь в формате:
-Возможен: Да/Нет
-Комментарий: (краткое пояснение)
+            prompt = f"""Ты — эксперт по тендерам. Оцени, является ли данный тендер потенциально интересным для поставщика. Ответь ТОЛЬКО одним словом: Да или Нет.
 
 Название тендера: {title}
 """
         answer = query_deepseek(prompt, license_key, device_id)
         possible = "Нет"
-        comment = ""
         for line in answer.split('\n'):
-            if line.startswith("Возможен:"):
-                possible = "Да" if "Да" in line else "Нет"
-            elif line.startswith("Комментарий:"):
-                comment = line.replace("Комментарий:", "").strip()
-        return possible, comment
+            if "Да" in line and "Нет" not in line:
+                possible = "Да"
+            elif "Нет" in line:
+                possible = "Нет"
+        return possible, ""
 
     max_items = 200
     results = []
     for idx in range(min(max_items, len(titles))):
         title = titles[idx]
         link = links[idx] if idx < len(links) else ""
-        possible, comment = analyze_title(title, custom_prompt)
+        possible, _ = analyze_title(title, custom_prompt)
         results.append({
             "Название": title,
             "Ссылка": link,
             "Возможен": possible,
-            "Комментарий": comment
+            "Комментарий": ""
         })
 
     output_df = pd.DataFrame(results)
